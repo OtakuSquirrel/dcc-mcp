@@ -6,6 +6,15 @@ from houdini_mcp.server import mcp, houdini
 from houdini_mcp.utils import obtain, obtain_list, parm_template_to_dict
 
 
+def _safe_expression(parm) -> str | None:
+    """Get expression string from a parm, returning None if none set."""
+    try:
+        expr = parm.expression()
+        return obtain(expr) if expr else None
+    except Exception:
+        return None
+
+
 @mcp.tool()
 def get_parameter(node_path: str, parm_name: str) -> dict:
     """Read a parameter value.
@@ -31,7 +40,7 @@ def get_parameter(node_path: str, parm_name: str) -> dict:
     return {
         "name": parm_name,
         "value": obtain(parm.eval()),
-        "expression": obtain(parm.expression()) if parm.expression() else None,
+        "expression": _safe_expression(parm),
     }
 
 
@@ -56,11 +65,17 @@ def set_parameter(node_path: str, parm_name: str, value) -> dict:
         ptuple.set(value)
         return {"name": parm_name, "value": obtain_list(ptuple.eval())}
     else:
+        # Try single parm first, then fall back to parmTuple
         parm = node.parm(parm_name)
-        if parm is None:
-            raise ValueError(f"Parameter not found: {parm_name}")
-        parm.set(value)
-        return {"name": parm_name, "value": obtain(parm.eval())}
+        if parm is not None:
+            parm.set(value)
+            return {"name": parm_name, "value": obtain(parm.eval())}
+        # Might be a tuple parm — set all components to the same scalar
+        ptuple = node.parmTuple(parm_name)
+        if ptuple is not None:
+            ptuple.set([value] * obtain(len(ptuple)))
+            return {"name": parm_name, "value": obtain_list(ptuple.eval())}
+        raise ValueError(f"Parameter not found: {parm_name}")
 
 
 @mcp.tool()

@@ -30,7 +30,7 @@ def get_geometry_info(path: str) -> dict:
         "path": path,
         "num_points": obtain(len(geo.points())),
         "num_prims": obtain(len(geo.prims())),
-        "num_vertices": obtain(len(geo.iterVertices())),
+        "num_vertices": sum(obtain(p.numVertices()) for p in geo.prims()),
         "point_attribs": point_attribs,
         "prim_attribs": prim_attribs,
         "vertex_attribs": vertex_attribs,
@@ -92,7 +92,8 @@ def get_attribute_values(path: str, attrib_name: str, attrib_type: str = "point"
         elements = geo.prims()
     elif attrib_type == "vertex":
         attrib = geo.findVertexAttrib(attrib_name)
-        elements = geo.iterVertices()
+        # Collect vertices from all prims (no top-level iterVertices in Houdini 21+)
+        elements = [v for p in geo.prims() for v in p.vertices()]
     elif attrib_type == "detail":
         attrib = geo.findGlobalAttrib(attrib_name)
         val = obtain(geo.attribValue(attrib_name))

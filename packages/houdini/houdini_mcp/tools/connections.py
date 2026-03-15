@@ -9,17 +9,17 @@ from houdini_mcp.utils import obtain
 @mcp.tool()
 def connect_nodes(
     from_node: str,
-    from_output: int,
     to_node: str,
-    to_input: int,
+    from_output: int = 0,
+    to_input: int = 0,
 ) -> dict:
     """Wire output of one node to input of another.
 
     Args:
         from_node: Path of the source node.
-        from_output: Output index on the source node.
         to_node: Path of the destination node.
-        to_input: Input index on the destination node.
+        from_output: Output index on the source node (default 0).
+        to_input: Input index on the destination node (default 0).
     """
     hou = houdini.hou
     src = hou.node(from_node)

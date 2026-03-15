@@ -12,13 +12,17 @@ def execute_python(code: str) -> dict:
 
     Args:
         code: Python code to execute. Has access to `hou` module.
+              Assign to `_result` to return a value.
     """
-    hou = houdini.hou
-    result = houdini.conn.modules.builtins.eval(
-        "exec(compile(code, '<mcp>', 'exec'), {'hou': hou, 'result': None}) or result",
-        {"code": code, "hou": hou, "result": None},
+    conn = houdini.conn
+    # Use teleport_function: define a helper on the remote side that runs
+    # exec() with a real dict, avoiding RPyC proxy-dict issues.
+    remote_exec = conn.modules.builtins.eval(
+        "lambda code: (lambda ns: (exec(compile(code, '<mcp>', 'exec'), ns), ns.get('_result')))({})",
     )
-    return {"result": obtain(result) if result is not None else None, "executed": True}
+    _, remote_result = remote_exec(code)
+    result = obtain(remote_result) if remote_result is not None else None
+    return {"result": result, "executed": True}
 
 
 @mcp.tool()
