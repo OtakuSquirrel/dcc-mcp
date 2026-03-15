@@ -1,0 +1,249 @@
+{% extends "base.html" %}
+
+{% block title %}{{ dcc_label }} Dashboard - dcc-mcp{% endblock %}
+
+{% block extra_css %}
+<style>
+  .dash-layout {
+    display: grid;
+    grid-template-columns: 1fr 360px;
+    gap: 16px;
+    align-items: start;
+  }
+  @media (max-width: 900px) {
+    .dash-layout { grid-template-columns: 1fr; }
+  }
+
+  /* ── Session List ── */
+  .session-list { padding: 0; }
+
+  .session-entry {
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--border);
+    transition: background 0.15s;
+    cursor: pointer;
+  }
+  .session-entry:last-child { border-bottom: none; }
+  .session-entry:hover { background: var(--accent-glow); }
+  .session-entry.highlight { background: var(--accent-glow); }
+
+  .session-row-top {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 6px;
+  }
+  .session-status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .session-status-dot.healthy { background: var(--green); }
+  .session-status-dot.unhealthy { background: var(--red); }
+  .session-status-dot.unknown { background: var(--text-dim); }
+
+  .session-id {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-bright);
+    font-family: 'Cascadia Code', 'Fira Code', monospace;
+  }
+  .session-client {
+    font-size: 11px;
+    color: var(--text-dim);
+    margin-left: auto;
+  }
+
+  .session-meta {
+    display: flex;
+    gap: 16px;
+    font-size: 11px;
+    color: var(--text-dim);
+    font-family: 'Cascadia Code', 'Fira Code', monospace;
+  }
+  .session-meta span { white-space: nowrap; }
+
+  .session-actions {
+    display: flex;
+    gap: 6px;
+    margin-top: 8px;
+  }
+
+  /* ── Quick Stats Sidebar ── */
+  .stat-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    margin-bottom: 12px;
+    padding: 16px 18px;
+  }
+  .stat-card-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+    color: var(--text-dim);
+    font-weight: 600;
+    margin-bottom: 6px;
+  }
+  .stat-card-value {
+    font-size: 24px;
+    font-weight: 700;
+    color: var(--text-bright);
+    font-family: 'Cascadia Code', 'Fira Code', monospace;
+  }
+  .stat-card-sub {
+    font-size: 11px;
+    color: var(--text-dim);
+    margin-top: 4px;
+  }
+
+  .stat-divider {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 12px 0;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="dash-layout">
+
+  <!-- Left: Session List -->
+  <div class="card">
+    <div class="card-header">
+      <span class="card-title">Sessions</span>
+      <div class="card-actions">
+        <button class="btn btn-ghost btn-sm" onclick="cleanupStale()">Cleanup Stale</button>
+        <button class="btn btn-accent btn-sm" onclick="loadSessions()">Refresh</button>
+      </div>
+    </div>
+    <div class="session-list" id="session-list">
+      <div class="empty-state">Loading sessions...</div>
+    </div>
+  </div>
+
+  <!-- Right: Quick Stats -->
+  <div>
+    <div class="stat-card">
+      <div class="stat-card-label">Active Sessions</div>
+      <div class="stat-card-value" id="qs-sessions">--</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-card-label">Enabled Tools</div>
+      <div class="stat-card-value" id="qs-tools">--</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-card-label">Port Range</div>
+      <div class="stat-card-value" id="qs-ports">--</div>
+      <div class="stat-card-sub" id="qs-ports-sub"></div>
+    </div>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  const DCC = '{{ dcc }}';
+  let _sessions = [];
+
+  async function loadSessions() {
+    try {
+      const data = await api(`/api/${DCC}/sessions/dashboard`);
+      _sessions = data.sessions || [];
+      renderSessions();
+      // Update quick stats
+      document.getElementById('qs-sessions').textContent = data.session_count != null ? data.session_count : _sessions.length;
+      document.getElementById('qs-tools').textContent = data.tool_count != null ? data.tool_count : '--';
+      if (data.port_range) {
+        document.getElementById('qs-ports').textContent = data.port_range[0] + ' - ' + data.port_range[1];
+        const total = data.port_range[1] - data.port_range[0] + 1;
+        const used = _sessions.length;
+        document.getElementById('qs-ports-sub').textContent = used + ' / ' + total + ' ports in use';
+      }
+    } catch (err) {
+      document.getElementById('session-list').innerHTML =
+        '<div class="empty-state" style="color:var(--red);">Failed to load sessions</div>';
+      console.error(err);
+    }
+  }
+
+  function renderSessions() {
+    const el = document.getElementById('session-list');
+    if (_sessions.length === 0) {
+      el.innerHTML = '<div class="empty-state">No active sessions</div>';
+      return;
+    }
+    el.innerHTML = _sessions.map(s => {
+      const statusClass = s.status === 'healthy' ? 'healthy' : (s.status === 'unhealthy' ? 'unhealthy' : 'unknown');
+      const created = s.created_at ? timeSince(s.created_at) : '';
+      return `
+        <div class="session-entry" data-port="${s.port}">
+          <div class="session-row-top">
+            <span class="session-status-dot ${statusClass}" title="${s.status || 'unknown'}"></span>
+            <span class="session-id">${esc(s.session_id || 'unknown')}</span>
+            <span class="session-client">${esc(s.client_name || '')}</span>
+          </div>
+          <div class="session-meta">
+            <span>Port ${s.port || '?'}</span>
+            ${s.mcp_pid ? '<span>MCP PID ' + s.mcp_pid + '</span>' : ''}
+            ${s.dcc_pid ? '<span>DCC PID ' + s.dcc_pid + '</span>' : ''}
+            ${created ? '<span>' + created + '</span>' : ''}
+          </div>
+          <div class="session-actions">
+            <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation(); healthCheck(${s.port})">Health Check</button>
+          </div>
+        </div>`;
+    }).join('');
+  }
+
+  async function healthCheck(port) {
+    try {
+      const data = await api(`/api/${DCC}/health/${port}`);
+      const ok = data.status === 'healthy' || data.status === 'ok';
+      showToast(`Port ${port}: ${ok ? 'Healthy' : data.status || 'Unknown'}`);
+    } catch (err) {
+      showToast(`Port ${port}: Health check failed`);
+    }
+  }
+
+  async function cleanupStale() {
+    try {
+      const data = await api(`/api/${DCC}/sessions/cleanup`, { method: 'POST' });
+      showToast(data.message || 'Stale sessions cleaned up');
+      loadSessions();
+    } catch (err) {
+      showToast('Cleanup failed');
+    }
+  }
+
+  /* ── SSE Live Updates ── */
+  function connectSSE() {
+    const source = new EventSource('/api/events');
+    source.onmessage = function(event) {
+      try {
+        const data = JSON.parse(event.data);
+        const dccData = data[DCC];
+        if (dccData) {
+          if (dccData.session_count != null) {
+            document.getElementById('qs-sessions').textContent = dccData.session_count;
+          }
+          if (dccData.tool_count != null) {
+            document.getElementById('qs-tools').textContent = dccData.tool_count;
+          }
+        }
+      } catch {}
+    };
+    source.onerror = function() {
+      source.close();
+      setTimeout(connectSSE, 5000);
+    };
+  }
+
+  /* ── Init ── */
+  loadSessions();
+  connectSSE();
+  setInterval(loadSessions, 10000);
+</script>
+{% endblock %}
