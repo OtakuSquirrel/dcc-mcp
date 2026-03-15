@@ -1,0 +1,22 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "dcc-mcp"
+version = "0.1.0"
+description = "Agent-oriented MCP servers for DCC applications (Blender, Houdini, Unreal Engine)"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.11"
+
+[tool.hatch.build]
+skip-excluded-dirs = true
+
+# Workspace-level dev dependencies
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.4",
+]
