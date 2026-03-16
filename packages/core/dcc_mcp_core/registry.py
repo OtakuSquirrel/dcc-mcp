@@ -157,17 +157,20 @@ class SessionRegistry:
 
 
 def is_pid_alive(pid: int) -> bool:
-    """Check if a process with the given PID is running."""
+    """Check if a process with the given PID is running.
+
+    On Windows uses ctypes OpenProcess (instant) instead of tasklist (slow).
+    """
     if os.name == "nt":
-        import subprocess
-        try:
-            result = subprocess.run(
-                ["tasklist", "/FI", f"PID eq {pid}", "/NH"],
-                capture_output=True, text=True, timeout=5,
-            )
-            return str(pid) in result.stdout
-        except Exception:
-            return False
+        import ctypes
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        handle = ctypes.windll.kernel32.OpenProcess(
+            PROCESS_QUERY_LIMITED_INFORMATION, False, pid,
+        )
+        if handle:
+            ctypes.windll.kernel32.CloseHandle(handle)
+            return True
+        return False
     else:
         try:
             os.kill(pid, 0)

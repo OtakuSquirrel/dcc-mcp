@@ -11,7 +11,12 @@ def main():
 
     import uvicorn
     print(f"dcc-mcp Dashboard: http://{args.host}:{args.port}")
-    uvicorn.run("dcc_mcp_core.webui.app:app", host=args.host, port=args.port)
+    uvicorn.run(
+        "dcc_mcp_core.webui.app:app",
+        host=args.host,
+        port=args.port,
+        access_log=False,
+    )
 
 
 if __name__ == "__main__":

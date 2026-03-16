@@ -108,7 +108,8 @@ dcc-mcp/
 │   │           │   ├── session_routes.py
 │   │           │   ├── tool_routes.py
 │   │           │   ├── config_routes.py
-│   │           │   └── health_routes.py
+│   │           │   ├── health_routes.py
+│   │           │   └── agent_routes.py
 │   │           └── templates/         # Jinja2 templates
 │   │               ├── base.html          # Shared layout + per-DCC theming
 │   │               ├── index.html         # Overview (all DCCs)
@@ -220,7 +221,7 @@ The dashboard is a multi-page Jinja2 app with per-DCC theming:
 | Dashboard | `/{dcc}/` | Sessions, health checks, quick stats |
 | Config | `/{dcc}/config` | Port range, launch settings, search paths |
 | Tools | `/{dcc}/tools` | Browse categories, enable/disable individual tools |
-| Agent | `/{dcc}/agent-config` | Agent integration (coming soon) |
+| Agent | `/{dcc}/agent-config` | One-click MCP install into Claude Desktop, VS Code, Cursor, Windsurf |
 
 Each DCC has its own accent color (Blender orange, Houdini red, UE blue) and icon that automatically applies when navigating between DCCs.
 

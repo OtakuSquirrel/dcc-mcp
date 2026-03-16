@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>{% block title %}dcc-mcp{% endblock %}</title>
+  <title>{% block title %}DCC MCP MANAGER{% endblock %}</title>
   <style>
     :root {
       --bg: #0f1117;
@@ -321,7 +321,7 @@
 
   <!-- Top Bar -->
   <div class="topbar">
-    <a href="/" class="topbar-logo">dcc-mcp</a>
+    <a href="/" class="topbar-logo">DCC MCP MANAGER</a>
     {% if dcc is defined and dcc %}
     <div class="topbar-dcc">
       <img src="{{ dcc_icon }}" alt="{{ dcc_label }}">
@@ -342,7 +342,6 @@
       <a href="/{{ dcc }}/" class="nav-tab {% if active_page == 'dashboard' %}active{% endif %}">Dashboard</a>
       <a href="/{{ dcc }}/config" class="nav-tab {% if active_page == 'config' %}active{% endif %}">Config</a>
       <a href="/{{ dcc }}/tools" class="nav-tab {% if active_page == 'tools' %}active{% endif %}">Tools</a>
-      <a href="/{{ dcc }}/agent" class="nav-tab {% if active_page == 'agent' %}active{% endif %}">Agent</a>
     </div>
     <div class="nav-spacer"></div>
     <div class="dcc-switcher">
@@ -364,7 +363,7 @@
   </div>
 
   <!-- Footer -->
-  <div class="site-footer">dcc-mcp v0.1.0</div>
+  <div class="site-footer">DCC MCP MANAGER v0.1.0</div>
 
   <!-- Toast -->
   <div class="toast" id="toast"></div>

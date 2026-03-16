@@ -38,6 +38,12 @@ async def cleanup_stale(dcc: str, br: DCCBridge = Depends(_validate)):
     return br.cleanup_stale(dcc)
 
 
+@router.get("/processes")
+async def list_processes(dcc: str, br: DCCBridge = Depends(_validate)):
+    """List running OS processes matching this DCC."""
+    return {"processes": br.get_dcc_processes(dcc)}
+
+
 @router.delete("/{session_id}")
 async def delete_session(dcc: str, session_id: str, br: DCCBridge = Depends(_validate)):
     """Remove a single session by ID."""

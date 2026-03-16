@@ -16,7 +16,7 @@ from .dcc_bridge import DCCBridge
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="dcc-mcp Dashboard", version="0.1.0")
+app = FastAPI(title="DCC MCP MANAGER", version="0.1.0")
 
 # ---------------------------------------------------------------------------
 # Directories
@@ -58,11 +58,15 @@ from .routes.session_routes import router as session_router  # noqa: E402
 from .routes.tool_routes import router as tool_router  # noqa: E402
 from .routes.config_routes import router as config_router  # noqa: E402
 from .routes.health_routes import router as health_router  # noqa: E402
+from .routes.agent_routes import router as agent_router  # noqa: E402
+from .routes.install_routes import router as install_router  # noqa: E402
 
 app.include_router(session_router)
 app.include_router(tool_router)
 app.include_router(config_router)
 app.include_router(health_router)
+app.include_router(agent_router)
+app.include_router(install_router)
 
 
 # ---------------------------------------------------------------------------
@@ -118,12 +122,6 @@ async def dcc_tools_page(request: Request, dcc: str):
     ctx = _page_context(request, dcc, active_page="tools")
     return templates.TemplateResponse("tools.html", ctx)
 
-
-@app.get("/{dcc}/agent-config", response_class=HTMLResponse)
-async def dcc_agent_config_page(request: Request, dcc: str):
-    """Per-DCC agent configuration page."""
-    ctx = _page_context(request, dcc, active_page="agent")
-    return templates.TemplateResponse("agent_config.html", ctx)
 
 
 # ---------------------------------------------------------------------------
