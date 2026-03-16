@@ -15,12 +15,14 @@ def execute_python(code: str) -> dict:
               Assign to `_result` to return a value.
     """
     conn = houdini.conn
-    # Use teleport_function: define a helper on the remote side that runs
-    # exec() with a real dict, avoiding RPyC proxy-dict issues.
+    # Build a real remote dict with hou pre-injected so user code can
+    # reference `hou` directly (matches Houdini's native shell behaviour).
+    ns = conn.modules.builtins.dict()
+    ns["hou"] = conn.modules.hou
     remote_exec = conn.modules.builtins.eval(
-        "lambda code: (lambda ns: (exec(compile(code, '<mcp>', 'exec'), ns), ns.get('_result')))({})",
+        "lambda code, ns: (exec(compile(code, '<mcp>', 'exec'), ns), ns.get('_result'))",
     )
-    _, remote_result = remote_exec(code)
+    _, remote_result = remote_exec(code, ns)
     result = obtain(remote_result) if remote_result is not None else None
     return {"result": result, "executed": True}
 

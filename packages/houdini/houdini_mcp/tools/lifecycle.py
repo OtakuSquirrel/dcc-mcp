@@ -5,9 +5,9 @@ Rewrite using dcc-mcp-core health checks.
 
 from __future__ import annotations
 
+import json
 import os
 import re
-import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -18,13 +18,10 @@ from houdini_mcp.server import mcp, houdini, registry, config, get_session_id, s
 
 
 _PLUGIN_DIR = Path(__file__).resolve().parent.parent.parent.parent.parent / "plugins" / "houdini"
-_STARTUP_SCRIPT = _PLUGIN_DIR / "houdini_mcp_startup.py"
 
-_HOOK_TAG = "# [HoudiniMCP]"
-_HOOK_LINE = (
-    'exec(open(hou.homeHoudiniDirectory() + "/scripts/houdini_mcp_startup.py").read())'
-    f'  {_HOOK_TAG}'
-)
+# Legacy hook markers (for cleanup only)
+_LEGACY_HOOK_TAG = "# [HoudiniMCP]"
+_LEGACY_STARTUP_NAME = "houdini_mcp_startup.py"
 
 
 def _find_houdini_installations() -> list[dict]:
@@ -64,11 +61,62 @@ def _get_houdini_prefs_dir(version: str) -> Path:
     return Path.home() / f"houdini{major_minor}"
 
 
+def _build_package_json() -> dict:
+    """Build Houdini packages JSON content for dcc_mcp.json."""
+    plugin_path = str(_PLUGIN_DIR).replace("\\", "/")
+    return {
+        "recommends": "houdini_version >= '20.0'",
+        "env": [
+            {"HOUDINI_MCP_ENABLED": "1"},
+        ],
+        "path": plugin_path,
+    }
+
+
+def _cleanup_legacy_hooks(prefs_dir: Path) -> list[str]:
+    """Remove legacy 456.py injection and copied startup script. Returns list of cleaned items."""
+    cleaned = []
+    scripts_dir = prefs_dir / "scripts"
+
+    # Remove [HoudiniMCP] line from 456.py
+    hook_file = scripts_dir / "456.py"
+    if hook_file.exists():
+        try:
+            content = hook_file.read_text(encoding="utf-8")
+            if _LEGACY_HOOK_TAG in content or _LEGACY_STARTUP_NAME in content:
+                lines = [l for l in content.splitlines()
+                         if _LEGACY_HOOK_TAG not in l and _LEGACY_STARTUP_NAME not in l]
+                while lines and not lines[-1].strip():
+                    lines.pop()
+                if lines:
+                    hook_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+                else:
+                    hook_file.unlink()
+                cleaned.append(f"456.py ({prefs_dir.name})")
+        except OSError:
+            pass
+
+    # Remove copied startup script
+    startup = scripts_dir / _LEGACY_STARTUP_NAME
+    if startup.exists():
+        startup.unlink()
+        cleaned.append(f"{_LEGACY_STARTUP_NAME} ({prefs_dir.name})")
+
+    return cleaned
+
+
 @mcp.tool()
 def install_startup_scripts(version: str | None = None) -> dict:
-    """Install MCP startup hook into Houdini's scripts directory."""
-    if not _STARTUP_SCRIPT.exists():
-        raise FileNotFoundError(f"Startup script not found: {_STARTUP_SCRIPT}")
+    """Install MCP plugin into Houdini via packages system (dcc_mcp.json).
+
+    Places dcc_mcp.json in ~/Documents/houdiniXX/packages/ which sets
+    HOUDINI_MCP_ENABLED=1 and adds the plugin dir to HOUDINI_PATH.
+    Houdini then auto-discovers 123.py/456.py from the plugin's scripts/ dir.
+
+    Also cleans up any legacy 456.py hook injection from older installs.
+    """
+    if not _PLUGIN_DIR.exists():
+        raise FileNotFoundError(f"Plugin directory not found: {_PLUGIN_DIR}")
 
     installations = _find_houdini_installations()
     if not installations:
@@ -81,57 +129,48 @@ def install_startup_scripts(version: str | None = None) -> dict:
     else:
         targets = installations
 
+    package_content = _build_package_json()
     results = {}
+
     for inst in targets:
         ver = inst["version"]
         prefs_dir = _get_houdini_prefs_dir(ver)
-        scripts_dir = prefs_dir / "scripts"
-        scripts_dir.mkdir(parents=True, exist_ok=True)
-        dest = scripts_dir / "houdini_mcp_startup.py"
-        shutil.copy2(str(_STARTUP_SCRIPT), str(dest))
 
-        hook_file = scripts_dir / "456.py"
-        if hook_file.exists():
-            content = hook_file.read_text(encoding="utf-8")
-            if _HOOK_TAG not in content:
-                if not content.endswith("\n"):
-                    content += "\n"
-                content += f"\n{_HOOK_LINE}\n"
-                hook_file.write_text(content, encoding="utf-8")
-                status = "injected"
-            else:
-                status = "already_present"
-        else:
-            hook_file.write_text(f"{_HOOK_LINE}\n", encoding="utf-8")
-            status = "created"
+        # Install dcc_mcp.json via packages system
+        packages_dir = prefs_dir / "packages"
+        packages_dir.mkdir(parents=True, exist_ok=True)
+        pkg_file = packages_dir / "dcc_mcp.json"
+        pkg_file.write_text(json.dumps(package_content, indent=2), encoding="utf-8")
 
-        results[ver] = {"scripts_dir": str(scripts_dir), "hook_status": status}
+        # Clean up legacy hooks if present
+        legacy_cleaned = _cleanup_legacy_hooks(prefs_dir)
 
-    return {"status": "installed", "versions": results}
+        results[ver] = {
+            "package_file": str(pkg_file),
+            "status": "installed",
+            "legacy_cleaned": legacy_cleaned,
+        }
+
+    return {"status": "installed", "method": "packages", "versions": results}
 
 
 @mcp.tool()
 def uninstall_startup_scripts(version: str) -> dict:
-    """Remove MCP startup hook from Houdini."""
+    """Remove MCP plugin from Houdini (packages JSON + any legacy hooks)."""
     prefs_dir = _get_houdini_prefs_dir(version)
-    scripts_dir = prefs_dir / "scripts"
 
-    hook_file = scripts_dir / "456.py"
-    if hook_file.exists():
-        content = hook_file.read_text(encoding="utf-8")
-        if _HOOK_TAG in content:
-            lines = [l for l in content.splitlines() if _HOOK_TAG not in l]
-            while lines and not lines[-1].strip():
-                lines.pop()
-            hook_file.write_text("\n".join(lines) + "\n" if lines else "", encoding="utf-8")
-
-    startup = scripts_dir / "houdini_mcp_startup.py"
     removed = []
-    if startup.exists():
-        startup.unlink()
-        removed.append(str(startup))
 
-    return {"status": "uninstalled", "version": version, "removed": removed}
+    # Remove dcc_mcp.json
+    pkg_file = prefs_dir / "packages" / "dcc_mcp.json"
+    if pkg_file.exists():
+        pkg_file.unlink()
+        removed.append(str(pkg_file))
+
+    # Also clean up legacy hooks
+    legacy_cleaned = _cleanup_legacy_hooks(prefs_dir)
+
+    return {"status": "uninstalled", "version": version, "removed": removed, "legacy_cleaned": legacy_cleaned}
 
 
 @mcp.tool()

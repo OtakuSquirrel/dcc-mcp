@@ -72,9 +72,27 @@ def _find_free_port():
     return None
 
 
+def _is_rpyc_already_running():
+    """Check if this Houdini process already has an RPyC server (started by 123.py)."""
+    import threading
+    for t in threading.enumerate():
+        if "start_server" in t.name and t.is_alive():
+            return True
+
+    # Fallback: check if the explicit port is already listening
+    explicit = os.environ.get("HOUDINI_MCP_PORT")
+    if explicit and _is_port_listening(int(explicit)):
+        return True
+    return False
+
+
 def _ensure_mcp_rpyc():
     """Start the RPyC server if not already running and config allows it."""
     if not _should_auto_start():
+        return
+
+    # 123.py already started the server — nothing to do
+    if _is_rpyc_already_running():
         return
 
     port = _find_free_port()

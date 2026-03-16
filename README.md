@@ -86,7 +86,7 @@ dcc-mcp-webui --port 9000  # custom port
 blender --python plugins/blender/start_mcp.py
 ```
 
-**Houdini**: Copy `plugins/houdini/houdini_mcp_startup.py` to your Houdini scripts directory (`$HOUDINI_USER_PREF_DIR/scripts/`), or set `HOUDINI_MCP_ENABLED=1` before launching.
+**Houdini**: Place `dcc_mcp.json` in `$HOUDINI_USER_PREF_DIR/packages/` (or use the `install_startup_scripts` MCP tool / WebUI install page). This uses Houdini's packages system to set `HOUDINI_MCP_ENABLED=1` and add the plugin path to `HOUDINI_PATH`.
 
 ## Project Structure
 
