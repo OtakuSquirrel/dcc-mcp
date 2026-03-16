@@ -189,6 +189,7 @@ def start_houdini(
 
     env = os.environ.copy()
     env["HOUDINI_MCP_ENABLED"] = "1"
+    env["HOUDINI_MCP_AGENT_LAUNCH"] = "1"
     env["HOUDINI_MCP_PORT"] = str(port)
 
     if mode == "hython":
@@ -248,6 +249,33 @@ def stop_houdini(force: bool = False, port: int | None = None) -> dict:
         except Exception:
             pass
 
+    # Kill the actual DCC process (not the cmd.exe wrapper).
+    # On Windows, `start "" "houdinifx.exe"` creates a cmd.exe child,
+    # so proc.kill() only kills cmd.exe. We need to kill the real PID.
+    dcc_pid = None
+
+    # Try to get DCC PID from session registry
+    if session_id:
+        for s in registry.list_sessions():
+            if s.get("session_id") == session_id:
+                dcc_pid = s.get("dcc_pid")
+                break
+
+    # Try to get DCC PID from health check (OS-level port→PID lookup)
+    if dcc_pid is None and target_port:
+        from dcc_mcp_core.health import find_pid_for_port
+        dcc_pid = find_pid_for_port(target_port, sessions=registry.list_sessions())
+
+    # Kill the DCC process directly via OS
+    if dcc_pid:
+        try:
+            import signal
+            os.kill(dcc_pid, signal.SIGTERM if not force else signal.SIGTERM)
+            # On Windows, os.kill with SIGTERM calls TerminateProcess
+        except (OSError, ProcessLookupError):
+            pass
+
+    # Also kill the wrapper process if we have one
     proc = houdini.get_process(target_port)
     if proc and proc.poll() is None:
         if force:
@@ -255,7 +283,7 @@ def stop_houdini(force: bool = False, port: int | None = None) -> dict:
         else:
             proc.terminate()
         try:
-            proc.wait(timeout=10)
+            proc.wait(timeout=5)
         except subprocess.TimeoutExpired:
             proc.kill()
 
@@ -265,7 +293,7 @@ def stop_houdini(force: bool = False, port: int | None = None) -> dict:
     if session_id:
         registry.unregister_session(session_id)
 
-    return {"status": "stopped", "port": target_port}
+    return {"status": "stopped", "port": target_port, "dcc_pid": dcc_pid}
 
 
 @mcp.tool()
@@ -305,6 +333,7 @@ def warm_pool(instances: list[dict], mode: str = "gui", timeout: int = 120) -> d
 
                 env = os.environ.copy()
                 env["HOUDINI_MCP_ENABLED"] = "1"
+                env["HOUDINI_MCP_AGENT_LAUNCH"] = "1"
                 env["HOUDINI_MCP_PORT"] = str(port)
 
                 if mode == "hython":

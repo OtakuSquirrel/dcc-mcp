@@ -11,33 +11,46 @@ from houdini_mcp.utils import obtain, obtain_list, node_to_dict
 
 @mcp.tool()
 def compare_screenshots(image_a: str, image_b: str) -> dict:
-    """Compare two images using SSIM (structural similarity).
+    """Compare two images using pixel-level similarity.
 
     Args:
         image_a: Path to the first image.
         image_b: Path to the second image.
 
     Returns:
-        Dict with SSIM score (1.0 = identical) and difference info.
+        Dict with similarity score (1.0 = identical) and difference info.
     """
     from PIL import Image
-    import numpy as np
-    from skimage.metrics import structural_similarity as ssim
 
-    img_a = np.array(Image.open(image_a).convert("RGB"))
-    img_b = np.array(Image.open(image_b).convert("RGB"))
+    a = Image.open(image_a).convert("RGB")
+    b = Image.open(image_b).convert("RGB")
 
-    if img_a.shape != img_b.shape:
-        img_b_resized = np.array(Image.open(image_b).convert("RGB").resize(
-            (img_a.shape[1], img_a.shape[0])
-        ))
-        img_b = img_b_resized
+    if a.size != b.size:
+        b = b.resize(a.size)
 
-    score = ssim(img_a, img_b, channel_axis=2)
+    try:
+        import numpy as np
+        arr_a = np.asarray(a, dtype=np.float32)
+        arr_b = np.asarray(b, dtype=np.float32)
+        mse = float(np.mean((arr_a - arr_b) ** 2))
+        # Normalize MSE to 0-1 similarity (max MSE = 255^2)
+        similarity = 1.0 - (mse / 65025.0)
+    except ImportError:
+        # Fallback: sample-based comparison (fast enough without numpy)
+        pixels_a = a.tobytes()
+        pixels_b = b.tobytes()
+        total = len(pixels_a)
+        if total == 0:
+            return {"similarity": 1.0, "identical": True, "image_a": image_a, "image_b": image_b}
+        # Sample every 16th byte for speed
+        step = max(1, total // 100000)
+        sampled = sum(abs(pixels_a[i] - pixels_b[i]) for i in range(0, total, step))
+        sample_count = (total + step - 1) // step
+        similarity = 1.0 - (sampled / (sample_count * 255))
 
     return {
-        "ssim": round(score, 4),
-        "identical": score > 0.99,
+        "similarity": round(similarity, 4),
+        "identical": similarity > 0.99,
         "image_a": image_a,
         "image_b": image_b,
     }

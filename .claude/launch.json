@@ -3,7 +3,7 @@
   "configurations": [
     {
       "name": "dcc-mcp-webui",
-      "runtimeExecutable": "D:\DEV\dcc-mcp\.venv\Scripts\python.exe",
+      "runtimeExecutable": "D:\\DEV\\dcc-mcp\\.venv\\Scripts\\python.exe",
       "runtimeArgs": ["-m", "dcc_mcp_core.webui", "--port", "8420"],
       "port": 8420
     }
