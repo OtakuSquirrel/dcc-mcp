@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import subprocess
 import time
+from pathlib import Path
 
 from dcc_mcp_core.health import check_health, is_port_open
 
@@ -42,7 +43,6 @@ def start_blender(
                 "status": "already_running",
                 "port": port,
                 "session_id": get_session_id(),
-                "message": f"Blender addon already reachable on port {port}.",
             }
         except Exception:
             pass
@@ -50,49 +50,33 @@ def start_blender(
     if blender_path is None:
         blender_path = _find_blender()
 
-    env = os.environ.copy()
+    env = _clean_env_for_dcc()
     env["BLENDER_MCP_PORT"] = str(port)
     env["BLENDER_MCP_ENABLED"] = "1"
 
-    proc = subprocess.Popen(
-        [blender_path],
-        env=env,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
-    )
+    proc = subprocess.Popen(f'start "" "{blender_path}"', shell=True, env=env)
 
     blender.register_process(port, proc)
 
-    result = {
-        "status": "launched",
-        "pid": proc.pid,
-        "port": port,
-    }
+    result = {"status": "launched", "pid": proc.pid, "port": port}
 
     if not wait_for_addon:
         return result
 
     start_time = time.time()
     while time.time() - start_time < timeout:
-        if proc.poll() is not None:
-            blender.unregister_process(port)
-            raise RuntimeError(f"Blender exited with code {proc.returncode}")
-
         if is_port_open(port):
             try:
                 blender.connect(port=port)
-                elapsed = int(time.time() - start_time)
                 result["status"] = "ready"
                 result["session_id"] = get_session_id()
-                result["startup_seconds"] = elapsed
+                result["startup_seconds"] = int(time.time() - start_time)
                 return result
             except Exception:
                 pass
         time.sleep(0.5)
 
     result["status"] = "timeout"
-    result["message"] = f"Blender launched but addon not reachable after {timeout}s."
     return result
 
 
@@ -117,29 +101,44 @@ def stop_blender(force: bool = False, port: int | None = None) -> dict:
         except Exception:
             pass
 
-    proc = blender.get_process(target_port)
-    if proc is not None:
-        if proc.poll() is None:
-            if force:
-                proc.kill()
-            else:
-                proc.terminate()
-            try:
-                proc.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                proc.wait(timeout=5)
+    # On Windows with `start`, proc is cmd.exe (already exited).
+    # Kill the real DCC process via session registry / port lookup.
+    dcc_pid = None
+    if session_id:
+        for s in registry.list_sessions():
+            if s.get("session_id") == session_id:
+                dcc_pid = s.get("dcc_pid")
+                break
 
+    if dcc_pid is None and target_port:
+        from dcc_mcp_core.health import find_pid_for_port
+        dcc_pid = find_pid_for_port(target_port, sessions=registry.list_sessions())
+
+    if dcc_pid:
+        try:
+            import signal
+            os.kill(dcc_pid, signal.SIGTERM)
+        except (OSError, ProcessLookupError):
+            pass
+
+    proc = blender.get_process(target_port)
+    if proc and proc.poll() is None:
+        if force:
+            proc.kill()
+        else:
+            proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+
+    if target_port:
         blender.unregister_process(target_port)
         blender.disconnect(port=target_port)
-        if session_id:
-            registry.unregister_session(session_id)
-        return {"status": "stopped", "port": target_port}
-
-    blender.disconnect(port=target_port)
     if session_id:
         registry.unregister_session(session_id)
-    return {"status": "no_managed_process", "port": target_port}
+
+    return {"status": "stopped", "port": target_port, "dcc_pid": dcc_pid}
 
 
 @mcp.tool()
@@ -147,31 +146,13 @@ def ensure_blender_ready(
     blender_path: str | None = None,
     timeout: int = 60,
 ) -> dict:
-    """Ensure Blender is running and connected. Start if needed.
-
-    Idempotent — safe to call multiple times.
-
-    Args:
-        blender_path: Path to blender.exe. Auto-detects if None.
-        timeout: Max seconds to wait for startup.
-
-    Returns:
-        Dict with connection status.
-    """
+    """Ensure Blender is running and connected. Start if needed."""
     if blender.is_connected():
-        return {
-            "status": "ready",
-            "port": blender._explicit_port,
-            "session_id": get_session_id(),
-        }
+        return {"status": "ready", "port": blender._explicit_port, "session_id": get_session_id()}
 
     try:
         blender.connect()
-        return {
-            "status": "ready",
-            "port": blender._explicit_port,
-            "session_id": get_session_id(),
-        }
+        return {"status": "ready", "port": blender._explicit_port, "session_id": get_session_id()}
     except Exception:
         pass
 
@@ -180,18 +161,13 @@ def ensure_blender_ready(
 
 @mcp.tool()
 def is_blender_healthy(port: int | None = None) -> dict:
-    """Check if Blender is responsive. Every check has a hard timeout.
-
-    Returns:
-        Dict with verdict (healthy/busy/hung/dead) and details.
-    """
+    """Check if Blender is responsive."""
     target_port = port or blender._active_port or blender._explicit_port
     if target_port is None:
         return {"verdict": "dead", "details": "No port configured."}
 
     def _ping_fn(host, p):
         import socket as _s
-        import json as _j
         sock = _s.socket(_s.AF_INET, _s.SOCK_STREAM)
         sock.settimeout(3)
         try:
@@ -202,68 +178,34 @@ def is_blender_healthy(port: int | None = None) -> dict:
         finally:
             sock.close()
 
-    sessions = registry.list_sessions()
-    return check_health(target_port, ping_fn=_ping_fn, sessions=sessions)
+    return check_health(target_port, ping_fn=_ping_fn, sessions=registry.list_sessions())
 
 
 @mcp.tool()
 def warm_pool(count: int = 1, blender_path: str | None = None) -> dict:
-    """Batch-launch idle Blender instances into the pool.
-
-    Args:
-        count: Number of instances to launch.
-        blender_path: Path to blender.exe. Auto-detects if None.
-
-    Returns:
-        Dict with launched ports.
-    """
+    """Batch-launch idle Blender instances into the pool."""
     if blender_path is None:
         blender_path = _find_blender()
 
-    launched = []
-    errors = []
-
+    launched, errors = [], []
     for _ in range(count):
         try:
             port = registry.allocate_port()
-            env = os.environ.copy()
+            env = _clean_env_for_dcc()
             env["BLENDER_MCP_PORT"] = str(port)
             env["BLENDER_MCP_ENABLED"] = "1"
-
-            proc = subprocess.Popen(
-                [blender_path],
-                env=env,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
-            )
+            proc = subprocess.Popen(f'start "" "{blender_path}"', shell=True, env=env)
             launched.append({"port": port, "pid": proc.pid})
         except Exception as e:
             errors.append(str(e))
 
-    return {
-        "launched": launched,
-        "count": len(launched),
-        "errors": errors,
-    }
+    return {"launched": launched, "count": len(launched), "errors": errors}
 
 
 @mcp.tool()
 def install_addon(blender_path: str | None = None) -> dict:
-    """Install/enable the MCP addon in Blender's addon directory.
-
-    Copies the addon files to Blender's scripts/addons directory.
-
-    Args:
-        blender_path: Path to Blender installation. Auto-detects if None.
-
-    Returns:
-        Dict with installation status.
-    """
-    # The addon source is in plugins/blender/ relative to the monorepo root
-    from pathlib import Path
+    """Install/enable the MCP addon in Blender's addon directory."""
     addon_src = Path(__file__).resolve().parent.parent.parent.parent.parent / "plugins" / "blender"
-
     if not addon_src.exists():
         raise FileNotFoundError(f"Addon source not found: {addon_src}")
 
@@ -277,6 +219,19 @@ def install_addon(blender_path: str | None = None) -> dict:
     }
 
 
+def _clean_env_for_dcc() -> dict:
+    """Return os.environ copy with Python-related vars stripped.
+
+    DCC apps bundle their own Python. Inheriting PYTHONPATH/PYTHONHOME
+    from the MCP server causes them to freeze or crash.
+    """
+    env = os.environ.copy()
+    for key in list(env):
+        if key.upper().startswith(("PYTHON", "VIRTUAL_ENV", "CONDA")):
+            del env[key]
+    return env
+
+
 def _find_blender() -> str:
     """Find blender.exe on the system."""
     import shutil
@@ -284,8 +239,6 @@ def _find_blender() -> str:
     if path:
         return path
 
-    # Common Windows locations
-    from pathlib import Path
     common_paths = [
         Path("C:/Program Files/Blender Foundation"),
         Path("C:/Program Files (x86)/Blender Foundation"),

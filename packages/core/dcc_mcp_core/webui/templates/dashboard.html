@@ -240,8 +240,7 @@
 
 <!-- Action Bar -->
 <div class="action-bar" style="margin-bottom: 16px;">
-  <button class="btn btn-accent btn-sm" onclick="scanDashboard()">Scan</button>
-  <button class="btn btn-ghost btn-sm" onclick="cleanupStale()">Cleanup Stale</button>
+  <button class="btn btn-accent btn-sm" onclick="refreshDashboard()">Refresh</button>
   <div class="action-bar-sep"></div>
   <span>
     <span class="stat-label">Instances</span>
@@ -492,15 +491,15 @@
 
   /* ── Actions ── */
 
-  async function cleanupStale() {
+  async function refreshDashboard() {
     try {
       const data = await api(`/api/${DCC}/sessions/cleanup`, { method: 'POST' });
       const count = data.count || 0;
-      showToast(`Cleaned ${count} stale session${count !== 1 ? 's' : ''}`);
-      scanDashboard();
-    } catch (err) {
-      showToast('Cleanup failed');
-    }
+      if (count > 0) {
+        showToast(`Cleaned ${count} stale session${count !== 1 ? 's' : ''}`);
+      }
+    } catch (_) { /* ignore cleanup errors */ }
+    scanDashboard();
   }
 
   async function removeSession(sessionId) {

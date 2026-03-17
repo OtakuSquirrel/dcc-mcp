@@ -125,15 +125,15 @@ class SessionRegistry:
         return sessions
 
     def cleanup_stale_sessions(self) -> list[str]:
-        """Remove sessions whose MCP server processes are no longer running."""
+        """Remove sessions whose DCC is no longer listening on the registered port."""
         cleaned = []
         for session in self.list_sessions():
-            mcp_pid = session.get("pid")
-            if mcp_pid is not None and not is_pid_alive(mcp_pid):
+            port = session.get("port")
+            if port is not None and not is_port_in_use(port):
                 session_id = session["session_id"]
                 self.unregister_session(session_id)
                 cleaned.append(session_id)
-                logger.info("Cleaned stale session %s (MCP pid %d dead)", session_id, mcp_pid)
+                logger.info("Cleaned stale session %s (port %d not listening)", session_id, port)
         return cleaned
 
     def allocate_port(self) -> int:
