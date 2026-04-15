@@ -31,3 +31,6 @@ houdini-mcp = "houdini_mcp.__main__:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["houdini_mcp"]
+
+[tool.uv.sources]
+dcc-mcp-core = { workspace = true }

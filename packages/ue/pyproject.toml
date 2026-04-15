@@ -24,3 +24,6 @@ ue-mcp = "ue_mcp.__main__:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["ue_mcp"]
+
+[tool.uv.sources]
+dcc-mcp-core = { workspace = true }

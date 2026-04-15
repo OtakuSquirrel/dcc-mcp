@@ -31,21 +31,18 @@ An AI agent connects to one or more DCC MCP servers via the standard [Model Cont
 
 ### Install
 
+Requires [uv](https://docs.astral.sh/uv/) (0.10+).
+
 ```bash
 # Clone the repo
 git clone https://github.com/OtakuSquirrel/dcc-mcp.git
 cd dcc-mcp
 
-# Create virtualenv
-python -m venv .venv
-.venv/Scripts/activate  # Windows
-# source .venv/bin/activate  # Linux/macOS
-
-# Install packages (editable)
-pip install -e packages/core[webui]
-pip install -e packages/blender
-pip install -e packages/houdini
+# Install all workspace members (editable) + webui extras
+uv sync --extra webui
 ```
+
+This single command sets up a `.venv/`, installs all four packages (`dcc-mcp-core`, `blender-mcp`, `houdini-mcp`, `ue-mcp`) as editable workspace members, and writes a `uv.lock` for reproducibility.
 
 ### Configure Claude Desktop / Cursor
 
@@ -70,12 +67,12 @@ Add to your MCP config (`claude_desktop_config.json` or Cursor settings):
 
 ```bash
 # Start a DCC MCP server (stdio mode, used by MCP clients)
-blender-mcp
-houdini-mcp
+uv run blender-mcp
+uv run houdini-mcp
 
 # Start the web dashboard
-dcc-mcp-webui              # http://127.0.0.1:8420
-dcc-mcp-webui --port 9000  # custom port
+uv run dcc-mcp-webui              # http://127.0.0.1:8420
+uv run dcc-mcp-webui --port 9000  # custom port
 ```
 
 ### DCC Plugin Setup
@@ -269,18 +266,16 @@ Verdicts: `healthy` | `busy` | `hung` | `dead` | `no_protocol`
 ## Development
 
 ```bash
-# Install all packages in dev mode
-pip install -e packages/core[dev,webui]
-pip install -e packages/blender
-pip install -e packages/houdini
+# Install all packages (dev + webui extras)
+uv sync --extra dev --extra webui
 
 # Run tests
-pytest packages/core/tests/
-pytest packages/blender/tests/
-pytest packages/houdini/tests/
+uv run pytest packages/core/tests/
+uv run pytest packages/blender/tests/
+uv run pytest packages/houdini/tests/
 
 # Lint
-ruff check packages/
+uv run ruff check packages/
 ```
 
 ## License

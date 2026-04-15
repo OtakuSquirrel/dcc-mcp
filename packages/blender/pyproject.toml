@@ -25,3 +25,6 @@ blender-mcp = "blender_mcp.__main__:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["blender_mcp"]
+
+[tool.uv.sources]
+dcc-mcp-core = { workspace = true }

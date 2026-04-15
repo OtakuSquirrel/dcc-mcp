@@ -9,9 +9,13 @@ description = "Agent-oriented MCP servers for DCC applications (Blender, Houdini
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.11"
-
-[tool.hatch.build]
-skip-excluded-dirs = true
+dependencies = [
+    "dcc-mcp-core",
+    "blender-mcp",
+    "houdini-mcp",
+    "ue-mcp",
+    "os-mcp",
+]
 
 # Workspace-level dev dependencies
 [project.optional-dependencies]
@@ -20,3 +24,19 @@ dev = [
     "pytest-asyncio>=0.23",
     "ruff>=0.4",
 ]
+webui = [
+    "dcc-mcp-core[webui]",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.workspace]
+members = ["packages/*"]
+
+[tool.uv.sources]
+dcc-mcp-core = { workspace = true }
+blender-mcp = { workspace = true }
+houdini-mcp = { workspace = true }
+ue-mcp = { workspace = true }
+os-mcp = { workspace = true }
