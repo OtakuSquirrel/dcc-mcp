@@ -1,7 +1,9 @@
 """FastMCP server definition for the Blender MCP Server.
 
-Creates the MCP server instance, initializes the TCP connection manager,
-and registers all tool modules.
+Stateless — every operation tool takes an explicit `port` argument.
+No session registry writes, no active-port concept. See
+`blender_mcp/_heartbeat.py` for the heartbeat task registry that wraps
+every tool call.
 """
 
 import logging
@@ -9,65 +11,53 @@ import logging
 from fastmcp import FastMCP
 
 from dcc_mcp_core.config import DCCConfig
-from dcc_mcp_core.registry import SessionRegistry
+from dcc_mcp_core.middleware import ToolGuardMiddleware
 from dcc_mcp_core.tool_registry import ToolRegistry
-from dcc_mcp_core.middleware import ClientNameMiddleware, ToolGuardMiddleware
 
+from blender_mcp._heartbeat import HeartbeatMiddleware, register_task_tools
 from blender_mcp.connection import BlenderConnectionManager
 from blender_mcp.tool_defs import CATEGORY_DEFS, DEFAULT_DISABLED_TOOLS
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# ── Configuration ──
+# ── Configuration (still via dcc-mcp-core until Phase 4 deletes core) ──
 config = DCCConfig(
     app_name="blender_mcp",
-    default_port_range=(19811, 19899),
-    dcc_search_paths=[],  # Blender doesn't need search paths (addon-based)
+    default_port_range=(19811, 19910),
+    dcc_search_paths=[],
 )
 
-# ── Session registry ──
-registry = SessionRegistry(config.sessions_dir, config.get_port_range)
-
-# ── Tool registry ──
 tool_registry = ToolRegistry(config, CATEGORY_DEFS, DEFAULT_DISABLED_TOOLS)
 
-# ── Session tracking ──
-_session_id: str | None = None
+# ── Stateless connection manager ──
+# Lazy, port-keyed, per-port locked. Shared across all tool invocations
+# in this MCP server process.
+blender = BlenderConnectionManager()
 
-# ── Global connection manager ──
-blender = BlenderConnectionManager(registry, config.get_port_range)
-
-# ── FastMCP server with middleware ──
+# ── FastMCP server with middleware chain ──
 mcp = FastMCP(
     "blender",
-    instructions="MCP Server for controlling Blender via TCP+JSON",
+    instructions=(
+        "MCP Server for controlling Blender via TCP+JSON. Every tool that "
+        "interacts with a Blender instance takes an explicit `port` argument "
+        "identifying which instance. Use `start_blender` to spawn a new "
+        "instance (returns the allocated port). Use "
+        "`os-mcp.list_dcc_instances()` to discover instances started outside "
+        "this session. Long tool calls yield via the heartbeat pattern — if "
+        "a call takes longer than 15s, you'll receive `status=running` with a "
+        "task_id; call `wait_task(task_id)` to keep waiting."
+    ),
     middleware=[
-        ClientNameMiddleware(on_client_name=lambda name: setattr(blender, '_client_name', name)),
         ToolGuardMiddleware(tool_registry),
+        HeartbeatMiddleware(),
     ],
 )
 
+# Register infrastructure tools (wait_task, list_tasks) on this mcp instance.
+register_task_tools(mcp)
 
-def set_port(port: int) -> None:
-    """Override the target port for the global connection."""
-    blender._explicit_port = port
-    logger.info("Blender target port set to %d", port)
-
-
-def set_session_id(sid: str) -> None:
-    """Set the session ID for this MCP server instance."""
-    global _session_id
-    _session_id = sid
-    blender._session_id = sid
-
-
-def get_session_id() -> str | None:
-    """Get the current session ID."""
-    return _session_id or blender._session_id
-
-
-# Import tool modules to register their tools on `mcp`.
+# Register operation tool modules (each file decorates its own @mcp.tool()s).
 import blender_mcp.tools.scene  # noqa: E402, F401
 import blender_mcp.tools.objects  # noqa: E402, F401
 import blender_mcp.tools.materials  # noqa: E402, F401
@@ -80,4 +70,4 @@ import blender_mcp.tools.viewport  # noqa: E402, F401
 import blender_mcp.tools.import_export  # noqa: E402, F401
 import blender_mcp.tools.execution  # noqa: E402, F401
 import blender_mcp.tools.lifecycle  # noqa: E402, F401
-import blender_mcp.tools.sessions  # noqa: E402, F401
+# tools.sessions DELETED in Phase 1b

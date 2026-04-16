@@ -1,6 +1,8 @@
-"""Tool category definitions for BlenderMCP.
+"""Tool category definitions for blender-mcp.
 
-Static metadata — descriptions, categories, default enable/disable state.
+Static metadata used by the Tauri manager to render the tool management
+UI. Every operation tool takes `port: int` as its first argument —
+see individual tool docstrings for full signatures.
 """
 
 from __future__ import annotations
@@ -81,9 +83,9 @@ CATEGORY_DEFS: dict[str, dict] = {
         },
     },
     "Viewport": {
-        "desc": "Viewport screenshots and settings",
+        "desc": "Viewport screenshots and settings (Blender-side)",
         "tools": {
-            "viewport_screenshot": "Take a viewport screenshot",
+            "viewport_screenshot": "Take a viewport screenshot via Blender API",
             "set_viewport_shading": "Set viewport shading mode",
             "set_viewport_camera": "Set viewport to camera view",
         },
@@ -102,28 +104,20 @@ CATEGORY_DEFS: dict[str, dict] = {
         },
     },
     "Lifecycle": {
-        "desc": "Start/stop Blender, health checks, addon management",
+        "desc": "Start/stop Blender instances (port-addressable)",
         "tools": {
-            "start_blender": "Launch Blender with MCP addon",
-            "stop_blender": "Stop Blender process",
-            "ensure_blender_ready": "Start Blender if not running (idempotent)",
-            "is_blender_healthy": "Check if Blender is responsive",
-            "warm_pool": "Batch-launch idle Blender instances",
-            "install_addon": "Install/enable the MCP addon in Blender",
+            "start_blender": "Launch Blender and return allocated port",
+            "stop_blender": "Gracefully stop Blender (for force-kill, use os-mcp.kill_process)",
+            "ensure_blender_ready": "Find or start a Blender instance",
+            "warm_pool": "Launch N Blender instances",
+            "install_addon": "Return addon install instructions",
         },
     },
-    "Sessions": {
-        "desc": "Manage MCP sessions, ports, multi-instance connections",
+    "Tasks": {
+        "desc": "Manage long-running tool calls (heartbeat pattern)",
         "tools": {
-            "list_all_sessions": "List all registered MCP sessions",
-            "disconnect_blender": "Disconnect from current Blender instance",
-            "get_current_session": "Get this MCP server's session info",
-            "cleanup_stale_sessions": "Remove sessions with dead processes",
-            "scan_ports": "Scan port range for Blender/MCP status",
-            "get_pool_status": "Show idle/active Blender instance counts",
-            "acquire_from_pool": "Grab an idle instance and connect to it",
-            "connect_to_blender": "Connect to a Blender instance on a port",
-            "switch_active_blender": "Switch which Blender receives commands",
+            "wait_task": "Continue waiting for a task that returned status=running",
+            "list_tasks": "List all in-flight tasks on this MCP server",
         },
     },
 }

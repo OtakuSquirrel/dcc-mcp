@@ -1,172 +1,92 @@
-"""TCP+JSON connection to Blender addon's socket server.
+"""TCP+JSON connection to Blender addon — stateless port-keyed cache.
 
-Blender addon runs a non-blocking TCP socket server on bpy.app.timers.
-This module connects to that server and sends JSON-RPC commands.
+Every send_command call names the target port. Connections are opened
+lazily on first use for a port, reused on subsequent calls to the same
+port, and dropped on connection error (will reconnect on next call).
 
-Port resolution (in priority order):
-  1. Explicit port passed to connect()
-  2. BLENDER_MCP_PORT environment variable
-  3. Auto-discovery: scan configured port range for an active listener
+There is no 'active port', no session registry, no client-name tracking.
+Claude addresses each Blender instance directly by port and remembers
+port→instance mappings in its own conversation context.
 """
 
 from __future__ import annotations
 
 import json
 import logging
-import os
 import socket
+import subprocess
+import threading
 from typing import Any
-
-from dcc_mcp_core.connection import ConnectionBase, ConnectionManagerBase
-from dcc_mcp_core.registry import SessionRegistry, is_port_in_use
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_PORT = 19811
-_RECV_SIZE = 1024 * 1024  # 1MB max response
+_RECV_SIZE = 1024 * 1024
 
 
-def discover_blender_port(
-    get_port_range: callable,
-    sessions: list[dict] | None = None,
-    timeout: float = 0.15,
-) -> int | None:
-    """Scan the configured port range for a Blender socket listener.
+class BlenderConnection:
+    """Raw TCP+JSON connection to one Blender instance on a known port."""
 
-    Prefers ports without an existing MCP session.
-    """
-    min_port, max_port = get_port_range()
-    logger.info("Scanning ports %d-%d for Blender socket server ...", min_port, max_port)
-
-    session_ports = set()
-    if sessions:
-        from dcc_mcp_core.registry import is_pid_alive
-        for s in sessions:
-            mcp_pid = s.get("pid")
-            if s.get("port") and mcp_pid and is_pid_alive(mcp_pid):
-                session_ports.add(s["port"])
-
-    listening_unlinked = []
-    listening_linked = []
-
-    for port in range(min_port, max_port + 1):
-        if is_port_in_use(port, timeout):
-            if port in session_ports:
-                listening_linked.append(port)
-            else:
-                listening_unlinked.append(port)
-
-    if listening_unlinked:
-        port = listening_unlinked[0]
-        logger.info("Found unlinked Blender listener on port %d", port)
-        return port
-
-    if listening_linked:
-        port = listening_linked[0]
-        logger.info("Found Blender listener on port %d (already has session)", port)
-        return port
-
-    logger.info("No Blender socket listeners found in port range")
-    return None
-
-
-class BlenderConnection(ConnectionBase):
-    """Manages a TCP+JSON connection to a running Blender instance.
-
-    The Blender addon must have its socket server running.
-    Commands are sent as JSON objects and responses are received as JSON.
-    """
-
-    def __init__(self, registry: SessionRegistry, host: str = "localhost", port: int | None = None):
-        super().__init__(registry, host, port)
+    def __init__(self, host: str = "localhost"):
+        self.host = host
         self._socket: socket.socket | None = None
+        self._port: int | None = None
 
-    def _do_connect(self, host: str, port: int) -> Any:
-        """Establish TCP connection to Blender addon."""
+    def connect(self, port: int) -> None:
         if self._socket is not None:
             try:
                 self._socket.close()
             except Exception:
                 pass
-
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(10)
-        sock.connect((host, port))
+        sock.connect((self.host, port))
         self._socket = sock
-        return sock
+        self._port = port
 
-    def _do_disconnect(self) -> None:
-        """Close the TCP socket."""
+    def disconnect(self) -> None:
         if self._socket is not None:
             try:
                 self._socket.close()
             except Exception:
                 pass
             self._socket = None
+            self._port = None
 
-    def _do_ping(self) -> bool:
-        """Ping Blender by sending a ping command."""
+    def is_connected(self) -> bool:
         if self._socket is None:
             return False
         try:
-            result = self.send_command("ping")
-            return result is not None
+            return self._ping()
         except Exception:
-            self._socket = None
             return False
 
-    def _get_dcc_info(self) -> tuple[int | None, str]:
-        """Query Blender for its PID and version."""
-        try:
-            result = self.send_command("get_info")
-            if result:
-                pid = result.get("pid")
-                version = result.get("version", "")
-                return pid, version
-        except Exception:
-            pass
-        return None, ""
+    def _ping(self) -> bool:
+        return self.send_command("ping") is not None
 
     def send_command(self, command: str, params: dict | None = None) -> Any:
-        """Send a JSON-RPC command to Blender and return the result.
-
-        Args:
-            command: Command name (e.g. 'create_object', 'ping').
-            params: Optional parameters dict.
-
-        Returns:
-            The result from Blender (parsed JSON).
-
-        Raises:
-            ConnectionError: If not connected or connection lost.
-            RuntimeError: If Blender returns an error.
-        """
         if self._socket is None:
-            raise ConnectionError("Not connected to Blender.")
-
-        request = {"command": command}
+            raise ConnectionError("Not connected.")
+        request: dict[str, Any] = {"command": command}
         if params:
             request["params"] = params
-
         data = json.dumps(request) + "\n"
-
         try:
             self._socket.sendall(data.encode("utf-8"))
             response_data = self._recv_response()
             response = json.loads(response_data)
-        except (socket.error, json.JSONDecodeError) as e:
+        except (OSError, json.JSONDecodeError) as e:
             self._socket = None
+            self._port = None
             raise ConnectionError(f"Communication error: {e}") from e
-
         if "error" in response:
             raise RuntimeError(f"Blender error: {response['error']}")
-
         return response.get("result")
 
     def _recv_response(self) -> str:
-        """Receive a complete JSON response (newline-delimited)."""
         buffer = b""
         while True:
+            if self._socket is None:
+                raise ConnectionError("Connection lost during recv")
             chunk = self._socket.recv(_RECV_SIZE)
             if not chunk:
                 raise ConnectionError("Connection closed by Blender")
@@ -176,42 +96,69 @@ class BlenderConnection(ConnectionBase):
                 return line.decode("utf-8")
 
 
-class BlenderConnectionManager(ConnectionManagerBase):
-    """Multi-instance proxy for Blender connections.
+class BlenderConnectionManager:
+    """Lazy port-keyed connection cache with per-port locks.
 
-    Transparent to tool modules — exposes send_command() on the active connection.
+    No 'active port'. Every call names a port. Connections are opened
+    lazily on first use for a port, reused on subsequent calls to the
+    same port, and dropped on connection error.
     """
 
-    def __init__(self, registry: SessionRegistry, get_port_range: callable):
-        super().__init__(registry)
-        self._get_port_range = get_port_range
+    def __init__(self):
+        self._connections: dict[int, BlenderConnection] = {}
+        self._processes: dict[int, subprocess.Popen] = {}
+        self._locks: dict[int, threading.Lock] = {}
+        self._registry_lock = threading.Lock()
 
-    def _create_connection(self) -> BlenderConnection:
-        return BlenderConnection(self._registry)
+    def send_command(
+        self, port: int, command: str, params: dict | None = None
+    ) -> Any:
+        """Send a command to the Blender instance on the given port."""
+        lock = self._get_lock(port)
+        with lock:
+            conn = self._get_or_open(port)
+            try:
+                return conn.send_command(command, params)
+            except ConnectionError:
+                # Drop dead connection; next call will reconnect.
+                self._connections.pop(port, None)
+                raise
 
-    def send_command(self, command: str, params: dict | None = None) -> Any:
-        """Send a command via the active connection."""
-        active = self._active
-        if not isinstance(active, BlenderConnection):
-            raise TypeError("Active connection is not a BlenderConnection")
-        return active.send_command(command, params)
+    def _get_lock(self, port: int) -> threading.Lock:
+        with self._registry_lock:
+            if port not in self._locks:
+                self._locks[port] = threading.Lock()
+            return self._locks[port]
 
-    def connect(self, port: int | None = None) -> None:
-        """Connect to Blender, with auto-discovery if no port specified."""
-        if port is None:
-            port = self._explicit_port
-        if port is None:
-            discovered = discover_blender_port(self._get_port_range)
-            if discovered:
-                port = discovered
-            else:
-                env_port = os.environ.get("BLENDER_MCP_PORT", "").strip()
-                if env_port:
-                    try:
-                        port = int(env_port)
-                    except ValueError:
-                        pass
-                if port is None:
-                    port = _DEFAULT_PORT
+    def _get_or_open(self, port: int) -> BlenderConnection:
+        conn = self._connections.get(port)
+        if conn is None:
+            conn = BlenderConnection()
+            conn.connect(port=port)
+            self._connections[port] = conn
+        return conn
 
-        super().connect(port)
+    def drop_connection(self, port: int) -> None:
+        """Close and forget the connection for a port (used by stop_blender)."""
+        conn = self._connections.pop(port, None)
+        if conn is not None:
+            try:
+                conn.disconnect()
+            except Exception:
+                pass
+
+    def register_process(self, port: int, proc: subprocess.Popen) -> None:
+        """Record that this MCP server launched a Blender process on this port."""
+        self._processes[port] = proc
+
+    def get_process(self, port: int) -> subprocess.Popen | None:
+        return self._processes.get(port)
+
+    def unregister_process(self, port: int) -> subprocess.Popen | None:
+        return self._processes.pop(port, None)
+
+    def is_alive(self, port: int) -> bool:
+        """Quick check without sending a command — is the port listening?"""
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(0.3)
+            return s.connect_ex(("localhost", port)) == 0
