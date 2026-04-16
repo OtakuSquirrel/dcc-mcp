@@ -13,11 +13,16 @@ fn list_dcc_instances(port_min: u16, port_max: u16) -> Vec<DccInstance> {
     scan::list_dcc_instances(port_min, port_max)
 }
 
+#[tauri::command]
+fn next_free_port(port_min: u16, port_max: u16) -> Option<u16> {
+    scan::next_free_port(port_min, port_max)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![list_dcc_instances])
+        .invoke_handler(tauri::generate_handler![list_dcc_instances, next_free_port])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

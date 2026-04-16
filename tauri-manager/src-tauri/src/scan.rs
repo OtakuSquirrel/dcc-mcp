@@ -144,6 +144,49 @@ pub fn list_dcc_instances(port_min: u16, port_max: u16) -> Vec<DccInstance> {
     instances
 }
 
+/// Return the first TCP port in `[port_min, port_max]` that is not currently
+/// held by any listening process. Returns `None` if the range is exhausted or
+/// `lsof` fails.
+///
+/// Unlike `list_dcc_instances`, this scans ALL listeners (not just DCCs) so we
+/// correctly avoid ports occupied by unrelated processes.
+pub fn next_free_port(port_min: u16, port_max: u16) -> Option<u16> {
+    if port_min > port_max {
+        return None;
+    }
+
+    let range_arg = format!("-iTCP:{}-{}", port_min, port_max);
+    let output = match Command::new("lsof")
+        .args([&range_arg, "-sTCP:LISTEN", "-P", "-n", "-F", "n"])
+        .output()
+    {
+        Ok(o) => o,
+        Err(e) => {
+            eprintln!("next_free_port: lsof spawn failed: {}", e);
+            return None;
+        }
+    };
+
+    let text = String::from_utf8_lossy(&output.stdout);
+    let mut occupied: std::collections::HashSet<u16> = std::collections::HashSet::new();
+    for line in text.lines() {
+        if let Some(rest) = line.strip_prefix('n') {
+            if let Some(port_str) = rest.rsplit(':').next() {
+                if let Ok(port) = port_str.parse::<u16>() {
+                    occupied.insert(port);
+                }
+            }
+        }
+    }
+
+    for port in port_min..=port_max {
+        if !occupied.contains(&port) {
+            return Some(port);
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -172,5 +215,18 @@ mod tests {
     fn scan_reversed_range_returns_empty() {
         let r = list_dcc_instances(20000, 19000);
         assert!(r.is_empty());
+    }
+
+    #[test]
+    fn next_free_reversed_range_returns_none() {
+        assert_eq!(next_free_port(20000, 19000), None);
+    }
+
+    #[test]
+    fn next_free_large_empty_range_returns_min() {
+        // Ports 55000-55010 are almost certainly free on a dev machine.
+        // If a test infra conflict ever occurs, adjust the range.
+        let p = next_free_port(55000, 55010);
+        assert!(p.is_some(), "expected a free port in 55000-55010");
     }
 }

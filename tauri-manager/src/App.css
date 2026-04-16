@@ -99,6 +99,79 @@ button:disabled {
   font-size: 12px;
 }
 
+/* ─── Manual Start (one-liner per DCC) ───────────────── */
+
+.manual-start {
+  margin-bottom: 24px;
+}
+
+.cmd-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+}
+
+.cmd-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 600;
+  color: #888;
+  width: 62px;
+  flex-shrink: 0;
+}
+
+.cmd-row.tag-hint-blender .cmd-label { color: #E87D0D; }
+.cmd-row.tag-hint-houdini .cmd-label { color: #FF3C00; }
+.cmd-row.tag-hint-ue      .cmd-label { color: #0D47A1; }
+.cmd-row.tag-hint-maya    .cmd-label { color: #2D88D8; }
+
+.cmd-code {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 10px;
+  background: #f4f4f4;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  font-family: "SF Mono", ui-monospace, monospace;
+  font-size: 11px;
+  line-height: 1.4;
+  color: #333;
+  overflow-x: auto;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.cmd-code:hover {
+  border-color: #aaa;
+  background: #eee;
+}
+
+.cmd-copied {
+  font-size: 10px;
+  color: #22c55e;
+  width: 42px;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.cmd-copied.show { opacity: 1; }
+
+.section-title {
+  margin: 0 0 12px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: #888;
+  text-transform: uppercase;
+}
+
+/* ─── Instances list ──────────────────────────────────── */
+
 .instances {
   list-style: none;
   padding: 0;
@@ -193,4 +266,14 @@ footer {
   .empty code { background: #2e2e2e; }
   .error { background: #2d1010; border-color: #663030; color: #ff8888; }
   .win-title { color: #bbb; }
+  .section-title, .cmd-label { color: #888; }
+  .cmd-code {
+    background: #1c1c1c;
+    color: #ddd;
+    border-color: #333;
+  }
+  .cmd-code:hover {
+    background: #252525;
+    border-color: #555;
+  }
 }
