@@ -37,3 +37,27 @@ export interface UninstallResult {
   was_installed: boolean;
   error: string | null;
 }
+
+// ── project.rs ──────────────────────────────────────────────────────
+
+export interface ManagedProject {
+  path: string;
+  installed_mcps: string[];
+  added_at: string;
+}
+
+export interface SetupResult {
+  ok: boolean;
+  project_path: string;
+  installed_mcps: string[];
+  settings_path: string;
+  /** "created" | "merged" */
+  settings_op: string;
+  error: string | null;
+}
+
+export interface RemoveResult {
+  ok: boolean;
+  removed_keys: string[];
+  error: string | null;
+}

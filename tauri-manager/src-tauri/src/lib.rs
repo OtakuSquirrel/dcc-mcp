@@ -5,9 +5,11 @@
 //! them to the React frontend.
 
 mod install;
+mod project;
 mod scan;
 
 use install::{DccVersion, InstallResult, UninstallResult};
+use project::{ManagedProject, RemoveResult, SetupResult};
 use scan::DccInstance;
 
 // ── Scan (Dashboard tab) ──────────────────────────────────────────────
@@ -39,16 +41,37 @@ fn uninstall_plugin(dcc: String, version: String) -> UninstallResult {
     install::uninstall_plugin(&dcc, &version)
 }
 
+// ── Project MCP setup (Install tab, sub-section 2) ────────────────────
+
+#[tauri::command]
+fn list_managed_projects() -> Vec<ManagedProject> {
+    project::list_managed_projects()
+}
+
+#[tauri::command]
+fn setup_project_mcp(project_path: String, mcps: Vec<String>) -> SetupResult {
+    project::setup_project_mcp(&project_path, mcps)
+}
+
+#[tauri::command]
+fn remove_project_mcp(project_path: String) -> RemoveResult {
+    project::remove_project_mcp(&project_path)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             list_dcc_instances,
             next_free_port,
             detect_dcc_versions,
             install_plugin,
             uninstall_plugin,
+            list_managed_projects,
+            setup_project_mcp,
+            remove_project_mcp,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
