@@ -77,7 +77,13 @@ fn dev_mcp_binary(name: &str) -> PathBuf {
     } else {
         repo_root.join(".venv").join("bin")
     };
-    bin_dir.join(name)
+    // Windows venv shims are `.exe`; Claude Code is lenient via PATHEXT,
+    // but we write the explicit path for clarity.
+    if cfg!(windows) {
+        bin_dir.join(format!("{name}.exe"))
+    } else {
+        bin_dir.join(name)
+    }
 }
 
 // ── Tracked projects registry ────────────────────────────────────────
@@ -356,6 +362,10 @@ mod tests {
         let p = dev_mcp_binary("blender-mcp");
         let s = p.to_string_lossy();
         assert!(s.contains(".venv"));
-        assert!(s.ends_with("blender-mcp"));
+        // Unix: .venv/bin/blender-mcp; Windows: .venv\Scripts\blender-mcp.exe
+        assert!(
+            s.ends_with("blender-mcp") || s.ends_with("blender-mcp.exe"),
+            "unexpected path: {s}"
+        );
     }
 }

@@ -5,7 +5,7 @@
       "name": "tauri-manager",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["--prefix", "tauri-manager", "run", "dev"],
-      "port": 1420
+      "port": 5173
     }
   ]
 }

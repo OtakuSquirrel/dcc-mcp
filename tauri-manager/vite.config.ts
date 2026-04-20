@@ -22,14 +22,17 @@ export default defineConfig(async () => ({
   clearScreen: false,
   // 2. tauri expects a fixed port, fail if that port is not available
   server: {
-    port: 1420,
+    // 1420 (Tauri's default) lands inside Windows's TCP port exclusion
+    // ranges on common Hyper-V setups and fails to bind. 5173 is Vite's
+    // historical default and outside every standard exclusion range.
+    port: 5173,
     strictPort: true,
     host: host || false,
     hmr: host
       ? {
           protocol: "ws",
           host,
-          port: 1421,
+          port: 5174,
         }
       : undefined,
     watch: {
