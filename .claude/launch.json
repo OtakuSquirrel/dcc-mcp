@@ -2,10 +2,10 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "dcc-mcp-webui",
-      "runtimeExecutable": "D:\\DEV\\dcc-mcp\\.venv\\Scripts\\python.exe",
-      "runtimeArgs": ["-m", "dcc_mcp_core.webui", "--port", "8420"],
-      "port": 8420
+      "name": "tauri-manager",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "tauri-manager", "run", "dev"],
+      "port": 1420
     }
   ]
 }
