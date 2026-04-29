@@ -203,9 +203,15 @@ function VersionRow({
   );
 }
 
+// DCCs for which detection + install is wired in src-tauri/src/install.rs.
+// Keep in sync with `SPECS` there. UE remains deferred — its plugin
+// model (engine-scoped Plugins folder, .uplugin manifests, editor
+// restart) doesn't fit the shared flow.
+const SUPPORTED_INSTALL: readonly string[] = ["blender", "houdini", "maya"];
+
 function DccInstallBlock({ dcc }: { dcc: DccMeta }) {
   const { versions, loading, error, refresh } = useDccVersions(dcc);
-  const supported = dcc.key === "blender"; // Phase 3c-1: Blender only
+  const supported = SUPPORTED_INSTALL.includes(dcc.key);
 
   return (
     <div className="divide-y divide-border">
@@ -235,7 +241,11 @@ function DccInstallBlock({ dcc }: { dcc: DccMeta }) {
         </div>
       </div>
 
-      {loading ? (
+      {!supported ? (
+        <div className="px-5 py-6 text-center text-[12px] text-muted-foreground">
+          Install flow coming in a later phase
+        </div>
+      ) : loading ? (
         <div className="space-y-2 px-5 py-3">
           <Skeleton className="h-6 w-full" />
           <Skeleton className="h-6 w-3/4" />
@@ -244,9 +254,7 @@ function DccInstallBlock({ dcc }: { dcc: DccMeta }) {
         <div className="px-5 py-6 text-center text-sm text-destructive">{error}</div>
       ) : versions.length === 0 ? (
         <div className="px-5 py-6 text-center text-[12px] text-muted-foreground">
-          {supported
-            ? `No ${dcc.label} installations detected`
-            : "Install flow coming in a later phase"}
+          No {dcc.label} installations detected
         </div>
       ) : (
         versions.map((v) => (

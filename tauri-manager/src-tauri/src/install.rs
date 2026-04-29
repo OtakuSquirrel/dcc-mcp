@@ -1,8 +1,17 @@
 //! DCC plugin installation.
 //!
-//! Phase 3c-1 implements Blender only. Other DCCs (Houdini / UE / Maya)
-//! return empty version lists for now; their install flows will follow
-//! when user has access to those tools.
+//! Phase 3c-3: table-driven across Blender, Houdini, and Maya. UE
+//! remains deferred — its plugin model (engine- vs project-scoped
+//! Plugins folders, .uplugin manifests, editor restart) is different
+//! enough that bolting it into the shared flow would regress the others.
+//! UE returns an empty version list; the UI surfaces it as "not yet
+//! wired".
+//!
+//! Each DCC's detection logic returns the set of versions found on the
+//! local machine, plus the `addons_dir` into which the plugin is
+//! installed. The common install/uninstall machinery (symlink-first with
+//! a deep-copy fallback, re-install wipes a stale directory) is then
+//! shared via a single code path parameterised by `DccSpec`.
 
 use serde::Serialize;
 use std::fs;
@@ -36,10 +45,61 @@ pub struct UninstallResult {
     pub error: Option<String>,
 }
 
+// ── Internal: per-DCC detected version ─────────────────────────────────
+
+#[derive(Debug, Clone)]
+struct DetectedVersion {
+    version: String,
+    pref_dir: PathBuf,
+    addons_dir: PathBuf,
+}
+
+// ── Per-DCC spec + detection implementations ───────────────────────────
+
+/// Static metadata + detection function for one DCC. The detect fn
+/// returns every version it finds on the current OS; the common install
+/// code handles everything else.
+struct DccSpec {
+    key: &'static str,
+    /// Directory under `<repo>/plugins/` holding the addon source.
+    source_subdir: &'static str,
+    /// Final directory name inside `addons_dir`. For Blender this is the
+    /// addon package name; for Houdini/Maya it's the folder the DCC will
+    /// import from a scripts path on startup.
+    target_name: &'static str,
+    detect: fn() -> Vec<DetectedVersion>,
+}
+
+const SPECS: &[DccSpec] = &[
+    DccSpec {
+        key: "blender",
+        source_subdir: "blender",
+        target_name: "blender_mcp",
+        detect: detect_blender,
+    },
+    DccSpec {
+        key: "houdini",
+        source_subdir: "houdini",
+        target_name: "houdini_mcp",
+        detect: detect_houdini,
+    },
+    DccSpec {
+        key: "maya",
+        source_subdir: "maya",
+        target_name: "maya_mcp",
+        detect: detect_maya,
+    },
+    // UE intentionally absent — unsupported path returns an empty list.
+];
+
+fn spec_for(dcc: &str) -> Option<&'static DccSpec> {
+    SPECS.iter().find(|s| s.key == dcc)
+}
+
 // ── Path helpers ───────────────────────────────────────────────────────
 
 /// Root of the repository's `plugins/` directory (where the addon source
-/// lives). In dev mode, this resolves via `CARGO_MANIFEST_DIR` which is
+/// lives). In dev mode this resolves via `CARGO_MANIFEST_DIR` which is
 /// baked in at compile time — pointing at `tauri-manager/src-tauri/`.
 /// Climbing `../../plugins` lands on `<repo>/plugins/`.
 ///
@@ -50,24 +110,10 @@ fn plugins_dir() -> PathBuf {
     PathBuf::from(manifest).join("../../plugins")
 }
 
-fn blender_base_dir() -> Option<PathBuf> {
-    #[cfg(target_os = "macos")]
-    {
-        let home = std::env::var_os("HOME")?;
-        Some(PathBuf::from(home).join("Library/Application Support/Blender"))
-    }
-    #[cfg(target_os = "windows")]
-    {
-        let appdata = std::env::var_os("APPDATA")?;
-        Some(PathBuf::from(appdata).join("Blender Foundation/Blender"))
-    }
-    #[cfg(target_os = "linux")]
-    {
-        let home = std::env::var_os("HOME")?;
-        Some(PathBuf::from(home).join(".config/blender"))
-    }
-    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
-    None
+fn home_dir() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(PathBuf::from)
 }
 
 /// True when `target` is a symlink (not a real file / dir).
@@ -77,78 +123,182 @@ fn is_symlink(target: &Path) -> bool {
         .unwrap_or(false)
 }
 
-// ── Detection ──────────────────────────────────────────────────────────
-
-pub fn detect_dcc_versions(dcc: &str) -> Vec<DccVersion> {
-    match dcc {
-        "blender" => detect_blender(),
-        // Other DCCs not yet implemented; empty list signals "no versions
-        // detected" in the UI.
-        _ => vec![],
-    }
-}
-
-fn detect_blender() -> Vec<DccVersion> {
-    let Some(base) = blender_base_dir() else {
+/// Iterate direct child directories of `base`, yielding `(name, path)`
+/// for each. Empty vec on missing dir / read error.
+fn list_subdirs(base: &Path) -> Vec<(String, PathBuf)> {
+    let Ok(entries) = fs::read_dir(base) else {
         return vec![];
     };
-    if !base.exists() {
-        return vec![];
-    }
-
-    let entries = match fs::read_dir(&base) {
-        Ok(e) => e,
-        Err(_) => return vec![],
-    };
-
-    let mut versions: Vec<DccVersion> = vec![];
-
+    let mut out = vec![];
     for entry in entries.flatten() {
         let path = entry.path();
         if !path.is_dir() {
             continue;
         }
-        let name = match path.file_name().and_then(|s| s.to_str()) {
-            Some(n) => n.to_string(),
-            None => continue,
-        };
-        // Skip non-version directories like "Config" or hidden dotfiles.
-        let first = name.chars().next();
-        if !first.map(|c| c.is_ascii_digit()).unwrap_or(false) {
+        let Some(name) = path.file_name().and_then(|s| s.to_str()) else {
             continue;
-        }
-
-        let addons_dir = path.join("scripts").join("addons");
-        let target = addons_dir.join("blender_mcp");
-        let installed = target.exists() || is_symlink(&target);
-        let install_method = if installed {
-            Some(
-                if is_symlink(&target) {
-                    "symlink"
-                } else {
-                    "copy"
-                }
-                .to_string(),
-            )
-        } else {
-            None
         };
-
-        versions.push(DccVersion {
-            version: name,
-            pref_dir: path.to_string_lossy().into_owned(),
-            addons_dir: addons_dir.to_string_lossy().into_owned(),
-            installed,
-            install_method,
-        });
+        out.push((name.to_string(), path));
     }
-
-    // Newest version first.
-    versions.sort_by(|a, b| b.version.cmp(&a.version));
-    versions
+    out
 }
 
-// ── Install / Uninstall ────────────────────────────────────────────────
+// ── Blender detection ──────────────────────────────────────────────────
+
+fn blender_base_dir() -> Option<PathBuf> {
+    #[cfg(target_os = "macos")]
+    {
+        Some(home_dir()?.join("Library/Application Support/Blender"))
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let appdata = std::env::var_os("APPDATA")?;
+        Some(PathBuf::from(appdata).join("Blender Foundation/Blender"))
+    }
+    #[cfg(target_os = "linux")]
+    {
+        Some(home_dir()?.join(".config/blender"))
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+    None
+}
+
+fn detect_blender() -> Vec<DetectedVersion> {
+    let Some(base) = blender_base_dir() else {
+        return vec![];
+    };
+    let mut out = vec![];
+    for (name, path) in list_subdirs(&base) {
+        // Skip non-version directories like "Config" or hidden dotfiles.
+        if !name
+            .chars()
+            .next()
+            .map(|c| c.is_ascii_digit())
+            .unwrap_or(false)
+        {
+            continue;
+        }
+        let addons_dir = path.join("scripts").join("addons");
+        out.push(DetectedVersion {
+            version: name,
+            pref_dir: path,
+            addons_dir,
+        });
+    }
+    out
+}
+
+// ── Houdini detection ──────────────────────────────────────────────────
+//
+// Houdini's user pref dir is `houdiniXX.X` under the platform-specific
+// parent. We strip the "houdini" prefix for display.
+
+fn houdini_parent_dir() -> Option<PathBuf> {
+    #[cfg(target_os = "macos")]
+    {
+        Some(home_dir()?.join("Library/Preferences/houdini"))
+    }
+    #[cfg(target_os = "windows")]
+    {
+        // Houdini on Windows drops its user prefs into `Documents/houdiniXX.X`.
+        Some(home_dir()?.join("Documents"))
+    }
+    #[cfg(target_os = "linux")]
+    {
+        home_dir()
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+    None
+}
+
+fn detect_houdini() -> Vec<DetectedVersion> {
+    let Some(parent) = houdini_parent_dir() else {
+        return vec![];
+    };
+
+    // On macOS the parent already IS `houdini/`; versions are `20.5/`,
+    // `19.5/` etc. On Windows / Linux the parent contains dirs named
+    // `houdiniXX.X` directly.
+    #[cfg(target_os = "macos")]
+    let (uses_prefix, prefix) = (false, "");
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    let (uses_prefix, prefix) = (true, "houdini");
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+    let (uses_prefix, prefix) = (false, "");
+
+    let mut out = vec![];
+    for (name, path) in list_subdirs(&parent) {
+        let version = if uses_prefix {
+            match name.strip_prefix(prefix) {
+                Some(rest) if !rest.is_empty() => rest.to_string(),
+                _ => continue,
+            }
+        } else {
+            // macOS: only accept directories starting with a digit.
+            if !name
+                .chars()
+                .next()
+                .map(|c| c.is_ascii_digit())
+                .unwrap_or(false)
+            {
+                continue;
+            }
+            name.clone()
+        };
+        // Addon target: `<prefs>/python3.X/houdini_mcp/` would require
+        // knowing the Python version. Simpler: drop it next to the other
+        // per-user scripts at `<prefs>/python/houdini_mcp/`, which is on
+        // HOUDINI_PATH via the default `scripts/python` entry.
+        let addons_dir = path.join("scripts").join("python");
+        out.push(DetectedVersion {
+            version,
+            pref_dir: path,
+            addons_dir,
+        });
+    }
+    out
+}
+
+// ── Maya detection ─────────────────────────────────────────────────────
+
+fn maya_parent_dir() -> Option<PathBuf> {
+    #[cfg(target_os = "macos")]
+    {
+        Some(home_dir()?.join("Library/Preferences/Autodesk/maya"))
+    }
+    #[cfg(target_os = "windows")]
+    {
+        Some(home_dir()?.join("Documents/maya"))
+    }
+    #[cfg(target_os = "linux")]
+    {
+        Some(home_dir()?.join("maya"))
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+    None
+}
+
+fn detect_maya() -> Vec<DetectedVersion> {
+    let Some(parent) = maya_parent_dir() else {
+        return vec![];
+    };
+    let mut out = vec![];
+    for (name, path) in list_subdirs(&parent) {
+        // Maya version dirs are 4-digit years: "2023", "2024", "2025".
+        if name.len() != 4 || !name.chars().all(|c| c.is_ascii_digit()) {
+            continue;
+        }
+        let addons_dir = path.join("scripts");
+        out.push(DetectedVersion {
+            version: name,
+            pref_dir: path,
+            addons_dir,
+        });
+    }
+    out
+}
+
+// ── Shared install / uninstall ─────────────────────────────────────────
 
 fn copy_dir_all(src: &Path, dst: &Path) -> std::io::Result<()> {
     fs::create_dir_all(dst)?;
@@ -176,40 +326,74 @@ fn remove_install(target: &Path) -> std::io::Result<()> {
     }
 }
 
+fn sorted_desc(mut versions: Vec<DccVersion>) -> Vec<DccVersion> {
+    versions.sort_by(|a, b| b.version.cmp(&a.version));
+    versions
+}
+
+// ── Public API ─────────────────────────────────────────────────────────
+
+pub fn detect_dcc_versions(dcc: &str) -> Vec<DccVersion> {
+    let Some(spec) = spec_for(dcc) else {
+        return vec![];
+    };
+    let detected = (spec.detect)();
+    let rows = detected
+        .into_iter()
+        .map(|d| {
+            let target = d.addons_dir.join(spec.target_name);
+            let sym = is_symlink(&target);
+            let installed = sym || target.exists();
+            let install_method = if installed {
+                Some(if sym { "symlink" } else { "copy" }.to_string())
+            } else {
+                None
+            };
+            DccVersion {
+                version: d.version,
+                pref_dir: d.pref_dir.to_string_lossy().into_owned(),
+                addons_dir: d.addons_dir.to_string_lossy().into_owned(),
+                installed,
+                install_method,
+            }
+        })
+        .collect();
+    sorted_desc(rows)
+}
+
 pub fn install_plugin(dcc: &str, version: &str) -> InstallResult {
-    match dcc {
-        "blender" => install_blender(version),
-        _ => InstallResult {
+    let Some(spec) = spec_for(dcc) else {
+        return InstallResult {
             ok: false,
             method: String::new(),
             path: String::new(),
             error: Some(format!("Install not implemented for {dcc} yet")),
-        },
-    }
-}
+        };
+    };
 
-fn install_blender(version: &str) -> InstallResult {
-    let Some(base) = blender_base_dir() else {
+    // Re-run detect and match by version — avoids re-deriving paths in a
+    // second place (single source of truth for "where does this addon go").
+    let detected = (spec.detect)();
+    let Some(v) = detected.into_iter().find(|d| d.version == version) else {
         return InstallResult {
             ok: false,
             method: String::new(),
             path: String::new(),
-            error: Some("Could not locate Blender pref directory on this platform".into()),
+            error: Some(format!("{dcc} version '{version}' not detected")),
         };
     };
 
-    let addons_dir = base.join(version).join("scripts").join("addons");
-    if let Err(e) = fs::create_dir_all(&addons_dir) {
+    if let Err(e) = fs::create_dir_all(&v.addons_dir) {
         return InstallResult {
             ok: false,
             method: String::new(),
-            path: addons_dir.to_string_lossy().into_owned(),
+            path: v.addons_dir.to_string_lossy().into_owned(),
             error: Some(format!("create addons dir: {e}")),
         };
     }
 
-    let target = addons_dir.join("blender_mcp");
-    let source = match plugins_dir().join("blender").canonicalize() {
+    let target = v.addons_dir.join(spec.target_name);
+    let source = match plugins_dir().join(spec.source_subdir).canonicalize() {
         Ok(p) => p,
         Err(e) => {
             return InstallResult {
@@ -221,7 +405,6 @@ fn install_blender(version: &str) -> InstallResult {
         }
     };
 
-    // Wipe any previous install (symlink or copy).
     if let Err(e) = remove_install(&target) {
         return InstallResult {
             ok: false,
@@ -231,7 +414,6 @@ fn install_blender(version: &str) -> InstallResult {
         };
     }
 
-    // Try symlink first — avoids copying and keeps the addon source live.
     #[cfg(unix)]
     let symlink_result = std::os::unix::fs::symlink(&source, &target);
     #[cfg(windows)]
@@ -246,8 +428,6 @@ fn install_blender(version: &str) -> InstallResult {
         };
     }
 
-    // Fallback: deep copy. Happens on Windows without symlink privilege
-    // or on filesystems that refuse symlinks.
     match copy_dir_all(&source, &target) {
         Ok(()) => InstallResult {
             ok: true,
@@ -265,25 +445,23 @@ fn install_blender(version: &str) -> InstallResult {
 }
 
 pub fn uninstall_plugin(dcc: &str, version: &str) -> UninstallResult {
-    match dcc {
-        "blender" => uninstall_blender(version),
-        _ => UninstallResult {
-            ok: false,
-            was_installed: false,
-            error: Some(format!("Uninstall not implemented for {dcc} yet")),
-        },
-    }
-}
-
-fn uninstall_blender(version: &str) -> UninstallResult {
-    let Some(base) = blender_base_dir() else {
+    let Some(spec) = spec_for(dcc) else {
         return UninstallResult {
             ok: false,
             was_installed: false,
-            error: Some("Could not locate Blender pref directory on this platform".into()),
+            error: Some(format!("Uninstall not implemented for {dcc} yet")),
         };
     };
-    let target = base.join(version).join("scripts").join("addons").join("blender_mcp");
+
+    let detected = (spec.detect)();
+    let Some(v) = detected.into_iter().find(|d| d.version == version) else {
+        return UninstallResult {
+            ok: true,
+            was_installed: false,
+            error: None,
+        };
+    };
+    let target = v.addons_dir.join(spec.target_name);
 
     let was_installed = target.exists() || is_symlink(&target);
     if !was_installed {
@@ -318,9 +496,43 @@ mod tests {
     }
 
     #[test]
+    fn ue_is_unsupported() {
+        // UE is intentionally not in SPECS yet.
+        assert!(detect_dcc_versions("ue").is_empty());
+        let r = install_plugin("ue", "5.4");
+        assert!(!r.ok);
+        assert!(r.error.is_some());
+    }
+
+    #[test]
     fn install_unknown_dcc_reports_error() {
         let r = install_plugin("nonexistent", "1.0");
         assert!(!r.ok);
         assert!(r.error.is_some());
+    }
+
+    #[test]
+    fn install_unknown_version_reports_error() {
+        // Even if the DCC key is known, a version that doesn't exist on
+        // this machine should surface a clear error rather than silently
+        // creating directories.
+        let r = install_plugin("blender", "9999.9999");
+        assert!(!r.ok);
+        assert!(r.error.as_ref().unwrap().contains("not detected"));
+    }
+
+    #[test]
+    fn uninstall_unknown_version_is_noop() {
+        let r = uninstall_plugin("blender", "9999.9999");
+        assert!(r.ok);
+        assert!(!r.was_installed);
+    }
+
+    #[test]
+    fn known_specs_are_wired() {
+        assert!(spec_for("blender").is_some());
+        assert!(spec_for("houdini").is_some());
+        assert!(spec_for("maya").is_some());
+        assert!(spec_for("ue").is_none());
     }
 }
