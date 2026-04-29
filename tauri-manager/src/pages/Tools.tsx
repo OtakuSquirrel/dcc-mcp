@@ -303,12 +303,15 @@ function Tools() {
           <code className="rounded bg-background px-1 py-0.5 font-mono text-[11px] text-code-text">
             ~/.dcc-mcp/config.toml
           </code>
-          . Runtime enforcement — Python MCP servers filtering{" "}
+          . MCP servers reload it on each{" "}
           <code className="rounded bg-background px-1 py-0.5 font-mono text-[11px] text-code-text">
             tools/list
           </code>
-          {" "}against this file — is a follow-up; for now the UI records your
-          intent.
+          {" "}/{" "}
+          <code className="rounded bg-background px-1 py-0.5 font-mono text-[11px] text-code-text">
+            tools/call
+          </code>
+          , so changes take effect immediately — no MCP restart needed.
         </p>
       </div>
 

@@ -28,7 +28,7 @@ config = DCCConfig(
     dcc_search_paths=[],
 )
 
-tool_registry = ToolRegistry(config, CATEGORY_DEFS, DEFAULT_DISABLED_TOOLS)
+tool_registry = ToolRegistry(config, CATEGORY_DEFS, DEFAULT_DISABLED_TOOLS, mcp_name="blender")
 
 # ── Stateless connection manager ──
 # Lazy, port-keyed, per-port locked. Shared across all tool invocations

@@ -25,7 +25,7 @@ config = DCCConfig(
 registry = SessionRegistry(config.sessions_dir, config.get_port_range)
 
 # ── Tool registry ──
-tool_registry = ToolRegistry(config, CATEGORY_DEFS, DEFAULT_DISABLED_TOOLS)
+tool_registry = ToolRegistry(config, CATEGORY_DEFS, DEFAULT_DISABLED_TOOLS, mcp_name="ue")
 
 # ── Session tracking ──
 _session_id: str | None = None

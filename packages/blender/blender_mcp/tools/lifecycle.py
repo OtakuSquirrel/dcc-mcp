@@ -17,10 +17,28 @@ import sys
 import time
 from pathlib import Path
 
+from dcc_mcp_core import unified_config
+
 from blender_mcp.server import mcp, blender
 
-# Phase 1b hardcoded. Phase 1e will read from ~/.dcc-mcp/config.toml.
-_PORT_RANGE: tuple[int, int] = (19811, 19910)
+# Per-DCC fallback when the user has never run the Tauri manager (no
+# ~/.dcc-mcp/config.toml exists yet). Once the manager has materialised
+# the file, the unified pool wins — see `_port_range()` below.
+_FALLBACK_PORT_RANGE: tuple[int, int] = (19811, 19910)
+
+
+def _port_range() -> tuple[int, int]:
+    """Resolved port range for Blender allocation.
+
+    If ``~/.dcc-mcp/config.toml`` exists, use the unified pool the
+    Tauri manager writes there (single shared range across all DCCs).
+    Otherwise stay on Blender's historical 19811–19910 so behaviour
+    on a stock checkout is unchanged.
+    """
+    if unified_config.exists():
+        p = unified_config.port_range()
+        return (p.min, p.max)
+    return _FALLBACK_PORT_RANGE
 
 
 # ── Helpers ──
@@ -84,7 +102,7 @@ def _is_port_listening(port: int, timeout: float = 0.3) -> bool:
 
 def _allocate_free_port() -> int:
     """Scan the port range, return the first free port."""
-    lo, hi = _PORT_RANGE
+    lo, hi = _port_range()
     for p in range(lo, hi + 1):
         if not _is_port_listening(p):
             return p

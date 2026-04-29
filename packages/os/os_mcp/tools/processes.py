@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dcc_mcp_core import unified_config
+
 from os_mcp.server import mcp
 from os_mcp._platform import (
     get_exe_path,
@@ -30,10 +32,6 @@ _DCC_EXE_PATTERNS: dict[str, str] = {
     "unrealeditor": "ue",
 }
 
-# Phase 1a hardcoded. Phase 1b+ will read from ~/.dcc-mcp/config.toml.
-_DEFAULT_PORT_RANGE: tuple[int, int] = (18811, 18910)
-
-
 def _identify_dcc(exe_path: str | None) -> str | None:
     if not exe_path:
         return None
@@ -41,10 +39,21 @@ def _identify_dcc(exe_path: str | None) -> str | None:
     return _DCC_EXE_PATTERNS.get(exe_name)
 
 
+def _default_port_range() -> tuple[int, int]:
+    """Resolve the default scan range from the unified config.
+
+    Falls back to the same defaults Rust uses (18811-20899) when the
+    file is missing — the values stay in lockstep across languages
+    via :mod:`dcc_mcp_core.unified_config`.
+    """
+    p = unified_config.port_range()
+    return (p.min, p.max)
+
+
 @mcp.tool()
 def list_dcc_instances(
-    port_min: int = _DEFAULT_PORT_RANGE[0],
-    port_max: int = _DEFAULT_PORT_RANGE[1],
+    port_min: int | None = None,
+    port_max: int | None = None,
 ) -> dict:
     """Scan a port range and list all running DCC instances.
 
@@ -54,13 +63,21 @@ def list_dcc_instances(
     filtered out.
 
     Args:
-        port_min: Start of port range (inclusive).
-        port_max: End of port range (inclusive).
+        port_min: Start of port range (inclusive). Defaults to the
+            ``[ports].min`` value in ``~/.dcc-mcp/config.toml``.
+        port_max: End of port range (inclusive). Defaults to the
+            ``[ports].max`` value in ``~/.dcc-mcp/config.toml``.
 
     Returns:
         {"instances": [{port, pid, dcc_type, exe_path, window_title}, ...],
          "count": N}
     """
+    if port_min is None or port_max is None:
+        default_min, default_max = _default_port_range()
+        if port_min is None:
+            port_min = default_min
+        if port_max is None:
+            port_max = default_max
     port_to_pid = list_listening_ports(port_min, port_max)
     instances = []
     for port in sorted(port_to_pid.keys()):
