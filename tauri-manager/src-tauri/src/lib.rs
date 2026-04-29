@@ -1,13 +1,15 @@
 //! DCC MCP Manager — Tauri backend.
 //!
-//! Phase 2a: exposes a single command `list_dcc_instances` that scans the
-//! local machine for listening DCC processes in a port range and returns
-//! them to the React frontend.
+//! Phase 1e: unified `~/.dcc-mcp/config.toml` backs port range and
+//! per-server tool-disable state. Phase 3c-3 ships multi-DCC plugin
+//! install (Blender, Houdini, Maya). Phase 3d wires the Tools tab.
 
+mod config;
 mod install;
 mod project;
 mod scan;
 
+use config::Config;
 use install::{DccVersion, InstallResult, UninstallResult};
 use project::{ManagedProject, RemoveResult, SetupResult};
 use scan::DccInstance;
@@ -22,6 +24,23 @@ fn list_dcc_instances(port_min: u16, port_max: u16) -> Vec<DccInstance> {
 #[tauri::command]
 fn next_free_port(port_min: u16, port_max: u16) -> Option<u16> {
     scan::next_free_port(port_min, port_max)
+}
+
+// ── Config (Phase 1e) ─────────────────────────────────────────────────
+
+#[tauri::command]
+fn get_config() -> Config {
+    config::load()
+}
+
+#[tauri::command]
+fn set_config_ports(min: u16, max: u16) -> Result<(), String> {
+    config::set_ports(min, max)
+}
+
+#[tauri::command]
+fn set_config_disabled_tools(mcp: String, disabled: Vec<String>) -> Result<(), String> {
+    config::set_disabled_tools(&mcp, disabled)
 }
 
 // ── Install (Install tab) ─────────────────────────────────────────────
@@ -60,12 +79,19 @@ fn remove_project_mcp(project_path: String) -> RemoveResult {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Materialize the config file on first launch so Python-side readers
+    // don't have to guess defaults.
+    config::ensure_exists();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             list_dcc_instances,
             next_free_port,
+            get_config,
+            set_config_ports,
+            set_config_disabled_tools,
             detect_dcc_versions,
             install_plugin,
             uninstall_plugin,

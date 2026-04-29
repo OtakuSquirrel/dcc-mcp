@@ -15,10 +15,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 
-import { DCCS, DCC_MAP, PORT_MIN, PORT_MAX } from "@/dcc-meta";
+import { DCCS, DCC_MAP } from "@/dcc-meta";
 import type { DccMeta } from "@/dcc-meta";
 import type { DccInstance } from "@/types";
 import { invoke, isTauri } from "@/lib/tauri";
+import { useConfig } from "@/lib/config";
 
 /** Stats shown in the action bar. */
 function Stat({
@@ -138,6 +139,10 @@ function InstanceItem({ inst }: { inst: DccInstance }) {
 }
 
 function Dashboard() {
+  const { config } = useConfig();
+  const portMin = config.ports.min;
+  const portMax = config.ports.max;
+
   const [instances, setInstances] = useState<DccInstance[]>([]);
   const [nextPort, setNextPort] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
@@ -151,13 +156,13 @@ function Dashboard() {
       const [list, freePort] = await Promise.all([
         invoke<DccInstance[]>(
           "list_dcc_instances",
-          { portMin: PORT_MIN, portMax: PORT_MAX },
+          { portMin, portMax },
           [],
         ),
         invoke<number | null>(
           "next_free_port",
-          { portMin: PORT_MIN, portMax: PORT_MAX },
-          PORT_MIN,
+          { portMin, portMax },
+          portMin,
         ),
       ]);
       setInstances(list);
@@ -169,7 +174,7 @@ function Dashboard() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [portMin, portMax]);
 
   useEffect(() => {
     refresh();
@@ -201,7 +206,7 @@ function Dashboard() {
         <Stat
           icon={Hash}
           label="Range"
-          value={`${PORT_MIN}–${PORT_MAX}`}
+          value={`${portMin}–${portMax}`}
         />
         <Stat
           icon={Activity}
@@ -263,7 +268,7 @@ function Dashboard() {
               <li className="flex flex-col items-center gap-2 py-10 text-center text-sm text-muted-foreground">
                 <CircleSlash className="size-5" />
                 <span>
-                  No DCC instances detected on ports {PORT_MIN}–{PORT_MAX}
+                  No DCC instances detected on ports {portMin}–{portMax}
                 </span>
                 {!isTauri() && (
                   <span className="text-[11px] text-muted-foreground/70">

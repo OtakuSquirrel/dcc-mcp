@@ -8,7 +8,9 @@
  * drives display colour and the appropriate Manual Start snippet.
  *
  * Port range is a single unified pool (see data_model memory).
- * Phase 1e will move the actual value into ~/.dcc-mcp/config.toml.
+ * The live value is sourced from ~/.dcc-mcp/config.toml via
+ * `useConfig()` — the PORT_MIN/PORT_MAX exports below are the fallback
+ * defaults used during the first render / in browser preview mode.
  */
 
 export type DccKey = "blender" | "houdini" | "ue" | "maya";
@@ -59,11 +61,9 @@ export const DCC_MAP: Record<string, DccMeta> = Object.fromEntries(
 );
 
 /**
- * Unified port pool for all DCCs.
- * Transitional value 18811-20899 keeps current per-DCC Python MCP
- * servers visible during migration; Phase 1e will narrow to the
- * memory-documented default 18811-18910 once MCP servers read from
- * ~/.dcc-mcp/config.toml.
+ * Fallback port pool — the live values come from config.toml. Kept in
+ * sync with `DEFAULT_CONFIG` in src/lib/config.ts and the Rust-side
+ * `Ports::default` in src-tauri/src/config.rs.
  */
 export const PORT_MIN = 18811;
 export const PORT_MAX = 20899;
