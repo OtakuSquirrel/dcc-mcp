@@ -15,3 +15,7 @@ venv/
 .ruff_cache/
 .mypy_cache/
 *.log
+
+# Claude Code worktrees live under the repo but are managed by the harness;
+# never commit their checked-out content into the main repo.
+.claude/worktrees/
