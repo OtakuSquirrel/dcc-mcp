@@ -204,11 +204,10 @@ function VersionRow({
 }
 
 // DCCs for which detection + install is wired in src-tauri/src/install.rs.
-// Keep in sync with `SPECS` there. UE installs into the engine-wide
-// `Engine/Content/Python/` directory, copying loose files (init_unreal.py
-// is auto-loaded by the editor only when it sits at the top of a Python
-// search path).
-const SUPPORTED_INSTALL: readonly string[] = ["blender", "houdini", "maya", "ue"];
+// Keep in sync with `SPECS` there. UE remains deferred — its plugin
+// model (engine-scoped Plugins folder, .uplugin manifests, editor
+// restart) doesn't fit the shared flow.
+const SUPPORTED_INSTALL: readonly string[] = ["blender", "houdini", "maya"];
 
 function DccInstallBlock({ dcc }: { dcc: DccMeta }) {
   const { versions, loading, error, refresh } = useDccVersions(dcc);

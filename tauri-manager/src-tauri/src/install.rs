@@ -1,17 +1,17 @@
 //! DCC plugin installation.
 //!
-//! Phase 3c-4: covers Blender, Houdini, Maya, and Unreal Engine. The
-//! first three install a single named directory under the per-version
-//! pref dir (`addons_dir/<target_name>`) — symlink first, deep-copy
-//! fallback. UE is engine-scoped: it copies individual `*.py` files
-//! straight into `<UE_install>/Engine/Content/Python/` because UE only
-//! auto-loads `init_unreal.py` when it lives at the top of a Python
-//! search path, not in a subdirectory.
+//! Phase 3c-3: table-driven across Blender, Houdini, and Maya. UE
+//! remains deferred — its plugin model (engine- vs project-scoped
+//! Plugins folders, .uplugin manifests, editor restart) is different
+//! enough that bolting it into the shared flow would regress the others.
+//! UE returns an empty version list; the UI surfaces it as "not yet
+//! wired".
 //!
 //! Each DCC's detection logic returns the set of versions found on the
 //! local machine, plus the `addons_dir` into which the plugin is
-//! installed. The shared install/uninstall machinery branches on
-//! `InstallKind` per spec.
+//! installed. The common install/uninstall machinery (symlink-first with
+//! a deep-copy fallback, re-install wipes a stale directory) is then
+//! shared via a single code path parameterised by `DccSpec`.
 
 use serde::Serialize;
 use std::fs;
@@ -56,21 +56,6 @@ struct DetectedVersion {
 
 // ── Per-DCC spec + detection implementations ───────────────────────────
 
-/// How a DCC's plugin source maps onto its addon search path.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum InstallKind {
-    /// Place the entire source directory at `addons_dir/<target_name>`,
-    /// preferring a symlink and falling back to a deep copy. Used by
-    /// Blender (the `addons/` convention), and by Houdini/Maya where
-    /// the target is a folder on a scripts search path.
-    DirectoryAtTarget,
-    /// Copy every `*.py` file from the source dir straight into
-    /// `addons_dir`, leaving `target_name` unused. Used by UE because
-    /// the editor only auto-loads `init_unreal.py` when it sits at the
-    /// top of a Python search path — not inside a subdirectory.
-    LooseFiles,
-}
-
 /// Static metadata + detection function for one DCC. The detect fn
 /// returns every version it finds on the current OS; the common install
 /// code handles everything else.
@@ -78,10 +63,10 @@ struct DccSpec {
     key: &'static str,
     /// Directory under `<repo>/plugins/` holding the addon source.
     source_subdir: &'static str,
-    /// Final directory name inside `addons_dir`. Ignored when
-    /// `kind == LooseFiles`.
+    /// Final directory name inside `addons_dir`. For Blender this is the
+    /// addon package name; for Houdini/Maya it's the folder the DCC will
+    /// import from a scripts path on startup.
     target_name: &'static str,
-    kind: InstallKind,
     detect: fn() -> Vec<DetectedVersion>,
 }
 
@@ -90,30 +75,21 @@ const SPECS: &[DccSpec] = &[
         key: "blender",
         source_subdir: "blender",
         target_name: "blender_mcp",
-        kind: InstallKind::DirectoryAtTarget,
         detect: detect_blender,
     },
     DccSpec {
         key: "houdini",
         source_subdir: "houdini",
         target_name: "houdini_mcp",
-        kind: InstallKind::DirectoryAtTarget,
         detect: detect_houdini,
     },
     DccSpec {
         key: "maya",
         source_subdir: "maya",
         target_name: "maya_mcp",
-        kind: InstallKind::DirectoryAtTarget,
         detect: detect_maya,
     },
-    DccSpec {
-        key: "ue",
-        source_subdir: "ue",
-        target_name: "",
-        kind: InstallKind::LooseFiles,
-        detect: detect_ue,
-    },
+    // UE intentionally absent — unsupported path returns an empty list.
 ];
 
 fn spec_for(dcc: &str) -> Option<&'static DccSpec> {
@@ -322,97 +298,6 @@ fn detect_maya() -> Vec<DetectedVersion> {
     out
 }
 
-// ── UE detection ───────────────────────────────────────────────────────
-//
-// UE installs land in `<root>/UE_<version>/Engine/Binaries/.../UnrealEditor.exe`.
-// Plugins go into `<root>/UE_<version>/Engine/Content/Python/` (engine-wide).
-// We scan a fixed set of common roots; users with non-standard locations
-// can rely on the Manual Start row in the UI rather than auto-detect.
-
-fn ue_search_roots() -> Vec<PathBuf> {
-    #[cfg(target_os = "windows")]
-    {
-        vec![
-            PathBuf::from("C:/Program Files/Epic Games"),
-            PathBuf::from("D:/Program Files/Epic Games"),
-            PathBuf::from("C:/Epic Games"),
-            PathBuf::from("D:/Epic Games"),
-        ]
-    }
-    #[cfg(target_os = "macos")]
-    {
-        vec![
-            PathBuf::from("/Users/Shared/Epic Games"),
-            home_dir().map(|h| h.join("Epic Games")).unwrap_or_default(),
-        ]
-        .into_iter()
-        .filter(|p| !p.as_os_str().is_empty())
-        .collect()
-    }
-    #[cfg(target_os = "linux")]
-    {
-        let home = home_dir();
-        let mut out = vec![];
-        if let Some(h) = home {
-            out.push(h.join("Epic Games"));
-        }
-        out.push(PathBuf::from("/opt/Epic Games"));
-        out
-    }
-    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
-    {
-        vec![]
-    }
-}
-
-fn detect_ue() -> Vec<DetectedVersion> {
-    let mut out = vec![];
-    for root in ue_search_roots() {
-        if !root.exists() {
-            continue;
-        }
-        for (name, path) in list_subdirs(&root) {
-            // Match `UE_5.4`, `UE_5.3`, `UE_4.27`, ...
-            let Some(version) = name.strip_prefix("UE_") else {
-                continue;
-            };
-            if version.is_empty() {
-                continue;
-            }
-            // Engine binary must exist before we offer install — otherwise
-            // we'd promote a corrupt or in-progress install.
-            #[cfg(target_os = "windows")]
-            let editor = path
-                .join("Engine/Binaries/Win64/UnrealEditor.exe")
-                .exists()
-                || path
-                    .join("Engine/Binaries/Win64/UE4Editor.exe")
-                    .exists();
-            #[cfg(target_os = "macos")]
-            let editor = path
-                .join("Engine/Binaries/Mac/UnrealEditor.app")
-                .exists();
-            #[cfg(target_os = "linux")]
-            let editor = path
-                .join("Engine/Binaries/Linux/UnrealEditor")
-                .exists();
-            #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
-            let editor = false;
-
-            if !editor {
-                continue;
-            }
-
-            out.push(DetectedVersion {
-                version: version.to_string(),
-                pref_dir: path.clone(),
-                addons_dir: path.join("Engine/Content/Python"),
-            });
-        }
-    }
-    out
-}
-
 // ── Shared install / uninstall ─────────────────────────────────────────
 
 fn copy_dir_all(src: &Path, dst: &Path) -> std::io::Result<()> {
@@ -448,39 +333,6 @@ fn sorted_desc(mut versions: Vec<DccVersion>) -> Vec<DccVersion> {
 
 // ── Public API ─────────────────────────────────────────────────────────
 
-/// List of `*.py` filenames a `LooseFiles` install drops into the
-/// addons dir. Source is always `<repo>/plugins/<source_subdir>/`.
-fn loose_files(spec: &DccSpec) -> Vec<PathBuf> {
-    let src = plugins_dir().join(spec.source_subdir);
-    let Ok(entries) = fs::read_dir(&src) else {
-        return vec![];
-    };
-    entries
-        .flatten()
-        .filter_map(|e| {
-            let p = e.path();
-            (p.is_file() && p.extension().and_then(|s| s.to_str()) == Some("py")).then_some(p)
-        })
-        .collect()
-}
-
-/// True when every loose file from the source dir is present at the
-/// target. Conservative — partial copies still report "installed" so
-/// the user gets prompted to repair via re-install.
-fn loose_files_installed(spec: &DccSpec, addons_dir: &Path) -> bool {
-    let files = loose_files(spec);
-    if files.is_empty() {
-        return false;
-    }
-    files.iter().any(|src| {
-        if let Some(name) = src.file_name() {
-            addons_dir.join(name).exists()
-        } else {
-            false
-        }
-    })
-}
-
 pub fn detect_dcc_versions(dcc: &str) -> Vec<DccVersion> {
     let Some(spec) = spec_for(dcc) else {
         return vec![];
@@ -488,33 +340,21 @@ pub fn detect_dcc_versions(dcc: &str) -> Vec<DccVersion> {
     let detected = (spec.detect)();
     let rows = detected
         .into_iter()
-        .map(|d| match spec.kind {
-            InstallKind::DirectoryAtTarget => {
-                let target = d.addons_dir.join(spec.target_name);
-                let sym = is_symlink(&target);
-                let installed = sym || target.exists();
-                let install_method = if installed {
-                    Some(if sym { "symlink" } else { "copy" }.to_string())
-                } else {
-                    None
-                };
-                DccVersion {
-                    version: d.version,
-                    pref_dir: d.pref_dir.to_string_lossy().into_owned(),
-                    addons_dir: d.addons_dir.to_string_lossy().into_owned(),
-                    installed,
-                    install_method,
-                }
-            }
-            InstallKind::LooseFiles => {
-                let installed = loose_files_installed(spec, &d.addons_dir);
-                DccVersion {
-                    version: d.version,
-                    pref_dir: d.pref_dir.to_string_lossy().into_owned(),
-                    addons_dir: d.addons_dir.to_string_lossy().into_owned(),
-                    installed,
-                    install_method: installed.then_some("copy".to_string()),
-                }
+        .map(|d| {
+            let target = d.addons_dir.join(spec.target_name);
+            let sym = is_symlink(&target);
+            let installed = sym || target.exists();
+            let install_method = if installed {
+                Some(if sym { "symlink" } else { "copy" }.to_string())
+            } else {
+                None
+            };
+            DccVersion {
+                version: d.version,
+                pref_dir: d.pref_dir.to_string_lossy().into_owned(),
+                addons_dir: d.addons_dir.to_string_lossy().into_owned(),
+                installed,
+                install_method,
             }
         })
         .collect();
@@ -552,26 +392,18 @@ pub fn install_plugin(dcc: &str, version: &str) -> InstallResult {
         };
     }
 
-    let source_dir = match plugins_dir().join(spec.source_subdir).canonicalize() {
+    let target = v.addons_dir.join(spec.target_name);
+    let source = match plugins_dir().join(spec.source_subdir).canonicalize() {
         Ok(p) => p,
         Err(e) => {
             return InstallResult {
                 ok: false,
                 method: String::new(),
-                path: v.addons_dir.to_string_lossy().into_owned(),
+                path: target.to_string_lossy().into_owned(),
                 error: Some(format!("plugin source not found: {e}")),
             };
         }
     };
-
-    match spec.kind {
-        InstallKind::DirectoryAtTarget => install_directory(&source_dir, &v.addons_dir, spec.target_name),
-        InstallKind::LooseFiles => install_loose_files(spec, &v.addons_dir),
-    }
-}
-
-fn install_directory(source: &Path, addons_dir: &Path, target_name: &str) -> InstallResult {
-    let target = addons_dir.join(target_name);
 
     if let Err(e) = remove_install(&target) {
         return InstallResult {
@@ -583,9 +415,9 @@ fn install_directory(source: &Path, addons_dir: &Path, target_name: &str) -> Ins
     }
 
     #[cfg(unix)]
-    let symlink_result = std::os::unix::fs::symlink(source, &target);
+    let symlink_result = std::os::unix::fs::symlink(&source, &target);
     #[cfg(windows)]
-    let symlink_result = std::os::windows::fs::symlink_dir(source, &target);
+    let symlink_result = std::os::windows::fs::symlink_dir(&source, &target);
 
     if symlink_result.is_ok() {
         return InstallResult {
@@ -596,7 +428,7 @@ fn install_directory(source: &Path, addons_dir: &Path, target_name: &str) -> Ins
         };
     }
 
-    match copy_dir_all(source, &target) {
+    match copy_dir_all(&source, &target) {
         Ok(()) => InstallResult {
             ok: true,
             method: "copy".into(),
@@ -609,48 +441,6 @@ fn install_directory(source: &Path, addons_dir: &Path, target_name: &str) -> Ins
             path: target.to_string_lossy().into_owned(),
             error: Some(format!("copy failed: {e}")),
         },
-    }
-}
-
-fn install_loose_files(spec: &DccSpec, addons_dir: &Path) -> InstallResult {
-    // UE wants individual `*.py` files at the top of `Engine/Content/Python/`,
-    // not a subdirectory. Copy each file fresh — symlinks for individual
-    // files cause headaches with UE's editor restart workflow on Windows.
-    let files = loose_files(spec);
-    if files.is_empty() {
-        return InstallResult {
-            ok: false,
-            method: String::new(),
-            path: addons_dir.to_string_lossy().into_owned(),
-            error: Some(format!(
-                "no .py files found in plugins/{}/",
-                spec.source_subdir
-            )),
-        };
-    }
-    let mut copied = 0usize;
-    for src in &files {
-        let Some(name) = src.file_name() else {
-            continue;
-        };
-        let dst = addons_dir.join(name);
-        // Best-effort wipe of a stale copy / symlink first.
-        let _ = remove_install(&dst);
-        if let Err(e) = fs::copy(src, &dst) {
-            return InstallResult {
-                ok: false,
-                method: String::new(),
-                path: dst.to_string_lossy().into_owned(),
-                error: Some(format!("copy {}: {e}", name.to_string_lossy())),
-            };
-        }
-        copied += 1;
-    }
-    InstallResult {
-        ok: true,
-        method: format!("copy ({copied} files)"),
-        path: addons_dir.to_string_lossy().into_owned(),
-        error: None,
     }
 }
 
@@ -671,15 +461,8 @@ pub fn uninstall_plugin(dcc: &str, version: &str) -> UninstallResult {
             error: None,
         };
     };
+    let target = v.addons_dir.join(spec.target_name);
 
-    match spec.kind {
-        InstallKind::DirectoryAtTarget => uninstall_directory(&v.addons_dir, spec.target_name),
-        InstallKind::LooseFiles => uninstall_loose_files(spec, &v.addons_dir),
-    }
-}
-
-fn uninstall_directory(addons_dir: &Path, target_name: &str) -> UninstallResult {
-    let target = addons_dir.join(target_name);
     let was_installed = target.exists() || is_symlink(&target);
     if !was_installed {
         return UninstallResult {
@@ -688,6 +471,7 @@ fn uninstall_directory(addons_dir: &Path, target_name: &str) -> UninstallResult 
             error: None,
         };
     }
+
     match remove_install(&target) {
         Ok(()) => UninstallResult {
             ok: true,
@@ -702,32 +486,6 @@ fn uninstall_directory(addons_dir: &Path, target_name: &str) -> UninstallResult 
     }
 }
 
-fn uninstall_loose_files(spec: &DccSpec, addons_dir: &Path) -> UninstallResult {
-    let files = loose_files(spec);
-    let mut found_any = false;
-    for src in &files {
-        let Some(name) = src.file_name() else {
-            continue;
-        };
-        let dst = addons_dir.join(name);
-        if dst.exists() || is_symlink(&dst) {
-            found_any = true;
-            if let Err(e) = remove_install(&dst) {
-                return UninstallResult {
-                    ok: false,
-                    was_installed: true,
-                    error: Some(format!("remove {}: {e}", name.to_string_lossy())),
-                };
-            }
-        }
-    }
-    UninstallResult {
-        ok: true,
-        was_installed: found_any,
-        error: None,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -738,29 +496,12 @@ mod tests {
     }
 
     #[test]
-    fn ue_install_unknown_version_reports_error() {
-        // UE is wired in Phase 3c-4; an unknown version should now error
-        // with "not detected" (same as Blender) rather than the old
-        // "not implemented" message.
-        let r = install_plugin("ue", "9999.9999");
+    fn ue_is_unsupported() {
+        // UE is intentionally not in SPECS yet.
+        assert!(detect_dcc_versions("ue").is_empty());
+        let r = install_plugin("ue", "5.4");
         assert!(!r.ok);
-        assert!(r.error.as_ref().unwrap().contains("not detected"));
-    }
-
-    #[test]
-    fn ue_loose_files_helper_finds_plugin_pys() {
-        // The repo's plugins/ue/ should hold init_unreal.py and
-        // ue_mcp_server.py. If this changes (e.g. plugin moves to a
-        // subdir), the LooseFiles install path will silently install
-        // nothing — fail loudly here instead.
-        let spec = spec_for("ue").expect("ue spec");
-        let files = loose_files(spec);
-        let names: Vec<_> = files
-            .iter()
-            .filter_map(|p| p.file_name().and_then(|n| n.to_str()).map(String::from))
-            .collect();
-        assert!(names.contains(&"init_unreal.py".to_string()), "names = {names:?}");
-        assert!(names.contains(&"ue_mcp_server.py".to_string()), "names = {names:?}");
+        assert!(r.error.is_some());
     }
 
     #[test]
@@ -792,24 +533,6 @@ mod tests {
         assert!(spec_for("blender").is_some());
         assert!(spec_for("houdini").is_some());
         assert!(spec_for("maya").is_some());
-        assert!(spec_for("ue").is_some());
-    }
-
-    #[test]
-    fn ue_uses_loose_files_kind() {
-        let spec = spec_for("ue").expect("ue spec");
-        assert!(matches!(spec.kind, InstallKind::LooseFiles));
-        // target_name is unused for LooseFiles; the empty string
-        // signals that to readers of SPECS.
-        assert_eq!(spec.target_name, "");
-    }
-
-    #[test]
-    fn blender_remains_directory_kind() {
-        // Regression guard: changing Blender to LooseFiles would break
-        // the Blender addon registration model (which expects a single
-        // `blender_mcp/` package directory under `addons/`).
-        let spec = spec_for("blender").expect("blender spec");
-        assert!(matches!(spec.kind, InstallKind::DirectoryAtTarget));
+        assert!(spec_for("ue").is_none());
     }
 }
