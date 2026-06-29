@@ -20,8 +20,8 @@
   --popover: #242736;
   --popover-foreground: #e4e6f0;
 
-  /* Primary accent (indigo) */
-  --primary: #6366f1;
+  /* Primary accent (Houdini orange — matches dcc-meta.ts houdini.color) */
+  --primary: #FF3C00;
   --primary-foreground: #ffffff;
 
   /* Secondary surface (for ghost buttons, muted bg) */

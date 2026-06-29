@@ -36,24 +36,27 @@ function App() {
         className="flex flex-1 flex-col"
       >
         <div className="border-b border-border bg-card px-6">
-          <TabsList className="h-12 bg-transparent p-0">
+          <TabsList
+            variant="line"
+            className="h-12 gap-0 bg-transparent p-0"
+          >
             <TabsTrigger
               value="dashboard"
-              className="h-12 gap-2 rounded-none border-b-2 border-transparent bg-transparent px-4 font-medium text-muted-foreground shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none"
+              className="h-12 gap-2 px-4 font-medium text-muted-foreground hover:text-foreground data-[state=active]:text-primary! after:bottom-0! after:bg-primary"
             >
               <LayoutDashboard className="size-4" />
               Dashboard
             </TabsTrigger>
             <TabsTrigger
               value="install"
-              className="h-12 gap-2 rounded-none border-b-2 border-transparent bg-transparent px-4 font-medium text-muted-foreground shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none"
+              className="h-12 gap-2 px-4 font-medium text-muted-foreground hover:text-foreground data-[state=active]:text-primary! after:bottom-0! after:bg-primary"
             >
               <Package className="size-4" />
               Install
             </TabsTrigger>
             <TabsTrigger
               value="tools"
-              className="h-12 gap-2 rounded-none border-b-2 border-transparent bg-transparent px-4 font-medium text-muted-foreground shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none"
+              className="h-12 gap-2 px-4 font-medium text-muted-foreground hover:text-foreground data-[state=active]:text-primary! after:bottom-0! after:bg-primary"
             >
               <Wrench className="size-4" />
               Tools

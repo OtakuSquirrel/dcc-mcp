@@ -1,0 +1,2 @@
+[mcp_servers.ue]
+command = "d:/DEV/dcc-mcp/.venv/Scripts/ue-mcp.exe"
