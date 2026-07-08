@@ -1,0 +1,26 @@
+{
+  "name": "dcc-control",
+  "version": "0.1.0",
+  "description": "Control local DCC applications (Blender, Houdini, Unreal Engine) via the dcc-daemon by sending Python through the execute_python channel.",
+  "entry": "SKILL.md",
+  "files": [
+    "SKILL.md",
+    "references/meta-tools.md",
+    "references/blender.md",
+    "references/houdini.md",
+    "references/unreal.md"
+  ],
+  "targets": {
+    "_comment": "Placeholder for future deployment. Local agents (e.g. Claude Code) read the skill directly from disk. Cloud/internal agents cannot read the repo; they fetch a packaged zip from an internal COS bucket described by this manifest. Names differ per agent runtime -- map them here when deploying. Nothing here is wired up yet; see LOADING.md.",
+    "local": {
+      "kind": "filesystem",
+      "path": "skills/dcc-control"
+    },
+    "cloud": {
+      "kind": "cos-zip",
+      "bucket": "<TODO: internal-cos-bucket>",
+      "object_key": "skills/dcc-control-0.1.0.zip",
+      "agent_name": "<TODO: per-runtime skill name>"
+    }
+  }
+}

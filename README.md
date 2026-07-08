@@ -101,6 +101,8 @@ packages/daemon/            the daemon
 plugins/common/             DCC-agnostic socket server, vendored per DCC
 plugins/blender_daemon/     Blender addon wiring the socket server to bpy
 plugins/ue_daemon/          Unreal script wiring the socket server to the game thread
+skills/dcc-control/         agent skill: how to drive DCCs via execute_python (SKILL.md + references/)
+docs/                       plugin-install guide; tunnel-hardening notes
 ```
 
 ## Remote agents (cloud tunnel)
