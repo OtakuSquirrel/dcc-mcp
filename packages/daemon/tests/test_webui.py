@@ -38,15 +38,16 @@ def test_api_instances_refresh_param():
         assert isinstance(r.json(), list)
 
 
-def test_api_health_bad_port():
+def test_api_health_unknown_instance():
     with _client() as client:
-        r = client.get("/api/health/not-a-port")
-        # Starlette int-less path param falls through to 404, or our 400.
-        assert r.status_code in (400, 404)
-
-
-def test_api_health_dead_port():
-    with _client() as client:
-        r = client.get("/api/health/65000")  # nothing listening
+        r = client.get("/api/health/nope-9")
+        # Unknown instance is a valid query → 200 with verdict "dead".
         assert r.status_code == 200
-        assert r.json()["verdict"] in {"dead", "unknown"}
+        assert r.json()["verdict"] == "dead"
+
+
+def test_api_health_dead_instance():
+    with _client() as client:
+        r = client.get("/api/health/blender-999")  # nothing registered
+        assert r.status_code == 200
+        assert r.json()["verdict"] == "dead"

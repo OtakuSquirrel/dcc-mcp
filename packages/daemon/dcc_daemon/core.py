@@ -1,9 +1,9 @@
-"""The daemon core — owns the single TransportPool, InstanceRegistry,
-and exposes them to whatever ingress (MCP-over-HTTP now, WebSocket
-tunnel later) is attached.
+"""The daemon core — owns the RegistrationHub and exposes it to whatever
+ingress (MCP-over-HTTP, WebSocket tunnel) is attached.
 
-One process, one pool, one registry. Ingress layers are thin and share
-this core so routing/discovery/health logic exists in exactly one place.
+One process, one hub. DCCs register with the hub (dial in and hold a
+connection); the core routes agent requests to them by ``instance_id``.
+Discovery/health logic lives here, in one place.
 """
 
 from __future__ import annotations
@@ -11,34 +11,42 @@ from __future__ import annotations
 import logging
 
 from dcc_daemon import health
-from dcc_daemon.registry import InstanceRegistry
-from dcc_daemon.transport import TransportPool
+from dcc_daemon.hub import HubError, RegistrationHub
 
 logger = logging.getLogger(__name__)
 
+# Re-export so ingress layers (tunnel client) can catch DCC-side errors
+# without importing the hub directly.
+DCCError = HubError
+
 
 class DaemonCore:
-    def __init__(self):
-        self.transport = TransportPool()
-        self.registry = InstanceRegistry(self.transport)
+    def __init__(self, hub: RegistrationHub | None = None):
+        self.hub = hub or RegistrationHub()
 
-    # ── the five things any agent can ask for ──
+    # ── the things any agent can ask for ──
 
     def list_instances(self, refresh: bool = False) -> list[dict]:
-        return [i.to_dict() for i in self.registry.list_instances(refresh=refresh)]
+        # refresh kept for signature compatibility; the registry is always
+        # live, so there is nothing to re-scan.
+        return self.hub.list()
 
-    def execute_python(self, port: int, code: str) -> dict:
-        """Run ``code`` in the DCC on ``port``. The plugin sets ``result``
-        to return a value; anything JSON-serializable comes back verbatim."""
-        result = self.transport.execute_python(port, code)
-        return {"port": port, "result": result}
+    def execute_python(self, instance_id: str, code: str) -> dict:
+        """Run ``code`` in the DCC ``instance_id``. The plugin sets
+        ``result`` to return a value; JSON-serializable comes back verbatim."""
+        result = self.hub.request(instance_id, "execute_python", {"code": code})
+        return {"instance_id": instance_id, "result": result}
 
-    def health(self, port: int) -> dict:
-        return health.check_health(port, ping_fn=lambda: self.transport.ping(port))
+    def health(self, instance_id: str) -> dict:
+        return health.check_health(instance_id, self.hub)
 
-    def screenshot(self, port: int) -> str:
+    def screenshot(self, instance_id: str) -> str:
         """Return a base64 PNG of the DCC's viewport/render."""
-        return self.transport.screenshot(port)
+        result = self.hub.request(instance_id, "screenshot")
+        if isinstance(result, dict):
+            return str(result.get("png_base64") or result.get("data") or "")
+        return str(result)
 
-    def get_info(self, port: int) -> dict:
-        return self.transport.get_info(port)
+    def get_info(self, instance_id: str) -> dict:
+        result = self.hub.request(instance_id, "get_info")
+        return result if isinstance(result, dict) else {}

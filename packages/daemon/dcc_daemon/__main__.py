@@ -21,11 +21,15 @@ from dcc_daemon import config
 
 
 def _start_tunnel(relay_url: str, daemon_id: str, pair_token: str) -> None:
-    """Run the outbound tunnel client in a background thread + loop."""
+    """Run the outbound tunnel client in a background thread + loop.
+
+    Uses the SAME DaemonCore (and thus the same registration hub) as the
+    local MCP ingress, so remote agents reach the same live DCCs."""
+    from dcc_daemon.mcp_server import core
     from dcc_daemon.tunnel.client import TunnelClient
 
     def _run():
-        client = TunnelClient(relay_url, daemon_id, pair_token)
+        client = TunnelClient(relay_url, daemon_id, pair_token, core=core)
         asyncio.run(client.run_forever())
 
     threading.Thread(target=_run, name="dcc-tunnel", daemon=True).start()

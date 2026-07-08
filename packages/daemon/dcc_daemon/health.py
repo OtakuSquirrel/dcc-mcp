@@ -1,57 +1,32 @@
-"""OS-level health checks for DCC processes.
+"""Health checks in the registration model.
 
-Ported from the old ``dcc_mcp_core.health``. Pure OS queries with hard
-timeouts — they NEVER hang even if the DCC is completely frozen. The
-Win32 paths (window-responding, CPU, modal-dialog detection) are
-Windows-only and degrade gracefully to ``None`` on macOS/Linux, where
-the daemon still reports port/protocol liveness.
+Two signals combine into a verdict:
 
-The daemon supplies the protocol ping via the unified transport, so
-health here takes a ``ping_fn`` rather than importing transport.
+* **connected** — is the DCC's registration still live? Free, from the
+  hub. A disconnected instance is simply gone (``dead``).
+* **responsive** — a ``ping`` that the plugin runs **on the DCC main
+  thread**. This is the crucial bit: a frozen DCC (modal dialog, infinite
+  loop) keeps its socket open on the network thread, so only a
+  main-thread heartbeat reveals the freeze. No reply in time ⇒ busy/hung.
+
+Windows OS checks (``IsHungAppWindow``, CPU sampling) refine "busy
+computing" vs "truly hung" using the pid the DCC reported at
+registration — no more scraping the pid from a port.
+
+Verdicts: healthy | busy | hung | dead | unknown.
 """
 
 from __future__ import annotations
 
 import logging
 import os
-import socket
-import subprocess
 import threading
 import time
-from typing import Callable
 
 logger = logging.getLogger(__name__)
 
 _IS_WIN = os.name == "nt"
-
-
-def is_port_open(port: int, host: str = "127.0.0.1", timeout: float = 0.3) -> bool:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.settimeout(timeout)
-        return s.connect_ex((host, port)) == 0
-
-
-def find_pid_for_port(port: int) -> int | None:
-    """Find the PID listening on a TCP port (cross-platform)."""
-    try:
-        if _IS_WIN:
-            r = subprocess.run(
-                ["powershell", "-NoProfile", "-Command",
-                 f"(Get-NetTCPConnection -LocalPort {port} -State Listen "
-                 f"-ErrorAction SilentlyContinue).OwningProcess"],
-                capture_output=True, text=True, timeout=5,
-            )
-            out = r.stdout.strip()
-            return int(out.split()[0]) if out else None
-        # macOS/Linux: lsof
-        r = subprocess.run(
-            ["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN", "-t"],
-            capture_output=True, text=True, timeout=5,
-        )
-        out = r.stdout.strip()
-        return int(out.split()[0]) if out else None
-    except Exception:
-        return None
+_PING_TIMEOUT = 3.0
 
 
 def check_window_responding(pid: int) -> bool | None:
@@ -120,100 +95,75 @@ def sample_cpu_percent(pid: int, interval: float = 0.4) -> float | None:
         kernel32.CloseHandle(h)
 
 
-def _ping_with_timeout(ping_fn: Callable[[], bool], timeout: float = 3.0) -> bool:
+def _ping_main_thread(hub, instance_id: str, timeout: float = _PING_TIMEOUT) -> bool:
+    """Ping that runs on the DCC main thread — reveals a wedged DCC.
+
+    Runs in a helper thread with a hard timeout so this never hangs even
+    if the DCC is frozen (the request itself would block otherwise)."""
     result = [False]
 
     def _run():
         try:
-            result[0] = ping_fn()
-        except Exception:
+            hub.request(instance_id, "ping", timeout=timeout)
+            result[0] = True
+        except Exception:  # noqa: BLE001
             pass
 
     t = threading.Thread(target=_run, daemon=True)
     t.start()
-    t.join(timeout=timeout)
+    t.join(timeout=timeout + 0.5)
     return result[0]
 
 
-def check_health(port: int, ping_fn: Callable[[], bool] | None = None) -> dict:
-    """Composite verdict for a DCC on ``port``.
+def check_health(instance_id: str, hub) -> dict:
+    """Composite verdict for a registered DCC.
 
-    verdicts: healthy | busy | hung | no_protocol | dead | unknown
+    verdicts: healthy | busy | hung | dead | unknown
     """
     result = {
-        "port": port,
+        "instance_id": instance_id,
+        "kind": None,
         "pid": None,
-        "process_alive": False,
+        "connected": False,
+        "responsive": False,
         "window_responding": None,
-        "port_listening": False,
-        "protocol_responsive": False,
         "cpu_percent": None,
         "verdict": "dead",
         "details": "",
     }
 
-    pid = find_pid_for_port(port)
-    if pid is None:
-        if is_port_open(port):
-            result["port_listening"] = True
-            result["verdict"] = "unknown"
-            result["details"] = f"port {port} listening but PID unknown"
-        else:
-            result["details"] = "nothing listening on this port"
+    reg = hub.get(instance_id)
+    if reg is None or reg._conn is None or not reg._conn.alive:
+        result["details"] = "no live registration for this instance"
         return result
 
-    result["pid"] = pid
-    result["process_alive"] = True
-    result["port_listening"] = is_port_open(port)
+    result["connected"] = True
+    result["kind"] = reg.kind
+    result["pid"] = reg.pid
 
-    proto = [False]
-    cpu: list[float | None] = [None]
-    win: list[bool | None] = [None]
+    responsive = _ping_main_thread(hub, instance_id)
+    result["responsive"] = responsive
 
-    def do_proto():
-        if ping_fn and result["port_listening"]:
-            proto[0] = _ping_with_timeout(ping_fn, timeout=3)
+    if responsive:
+        result["verdict"] = "healthy"
+        result["details"] = "responsive"
+        return result
 
-    def do_cpu():
-        cpu[0] = sample_cpu_percent(pid)
+    # Connected but the main thread didn't answer in time — busy or hung.
+    # Use OS signals to tell them apart.
+    pid = reg.pid
+    win = check_window_responding(pid) if pid else None
+    cpu = sample_cpu_percent(pid) if pid else None
+    result["window_responding"] = win
+    result["cpu_percent"] = cpu
 
-    def do_win():
-        win[0] = check_window_responding(pid)
-
-    threads = [threading.Thread(target=f, daemon=True) for f in (do_proto, do_cpu, do_win)]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join(timeout=5)
-
-    result["protocol_responsive"] = proto[0]
-    result["cpu_percent"] = cpu[0]
-    result["window_responding"] = win[0]
-
-    responding = win[0]
-    proto_ok = proto[0]
-    port_ok = result["port_listening"]
-    c = cpu[0]
-
-    if proto_ok:
-        if responding is False:
-            result["verdict"] = "busy"
-            result["details"] = "GUI frozen but protocol responsive — likely computing"
-        else:
-            result["verdict"] = "healthy"
-            result["details"] = "responsive"
-    elif port_ok:
-        if responding is False and (c is not None and c > 10):
-            result["verdict"] = "busy"
-            result["details"] = f"GUI/protocol unresponsive, CPU {c}% — heavy compute"
-        elif responding is False:
-            result["verdict"] = "hung"
-            result["details"] = f"GUI/protocol unresponsive, CPU {c if c is not None else '?'}% — hung"
-        else:
-            result["verdict"] = "no_protocol"
-            result["details"] = "window ok but protocol not answering"
+    if cpu is not None and cpu > 10:
+        result["verdict"] = "busy"
+        result["details"] = f"main thread not answering, CPU {cpu}% — heavy compute"
+    elif win is False:
+        result["verdict"] = "hung"
+        result["details"] = "main thread not answering and window not responding — hung"
     else:
-        result["verdict"] = "no_protocol" if responding is not None else "dead"
-        result["details"] = "process found but port not listening"
-
+        result["verdict"] = "busy"
+        result["details"] = "main thread not answering — busy or briefly blocked"
     return result

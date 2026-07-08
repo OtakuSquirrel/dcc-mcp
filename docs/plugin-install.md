@@ -5,31 +5,32 @@
 > of this can be automated (one-click install from the WebUI); for now
 > these are the manual steps.
 
-Every DCC embeds the **same** small socket-server plugin
-(`plugins/common/dcc_socket_server.py`). On launch the plugin reads the
-port pool from `~/.dcc-mcp/config.toml`, scans it, and **claims the first
-free port**. The daemon scans the same pool to discover instances. All
-DCCs are equal — the plugin self-reports its kind; the port carries no
-meaning.
+Every DCC embeds the **same** small connector
+(`plugins/common/dcc_socket_server.py`). On launch it **dials the daemon**
+(the daemon's `dcc_register_port`, default 8766), registers its identity,
+and holds the connection; the daemon assigns an `instance_id` and pushes
+requests down it. There is no listening port per DCC and no scanning. All
+DCCs are equal — the connector self-reports its kind.
 
-Configure the pool once (`~/.dcc-mcp/config.toml`):
+The daemon must be running first (or the connector retries until it is).
+The register port comes from `~/.dcc-mcp/config.toml`:
 
 ```toml
-[ports]
-dcc = [18811, 18812, 18813, 18814, 18815, 18816, 18817, 18818, 18819, 18820]
+[daemon]
+dcc_register_port = 8766
 ```
 
 Plugin files:
-- `plugins/common/dcc_socket_server.py` — shared server (needed by all)
+- `plugins/common/dcc_socket_server.py` — shared connector (needed by all)
 - `plugins/blender_daemon/` — Blender addon
 - `plugins/houdini_daemon/` — Houdini plugin
 - `plugins/ue_daemon/` — Unreal startup script
 - `plugins/maya_daemon/` — Maya startup script
 
 In every case, put `dcc_socket_server.py` **next to** the per-DCC
-`__init__.py` (each plugin adds its own dir to `sys.path`). To pin a
-specific port instead of claiming from the pool, set `DCC_DAEMON_PORT`
-before launching the DCC.
+`__init__.py` (each plugin adds its own dir to `sys.path`). To override
+the register port for one DCC, set `DCC_DAEMON_REGISTER_PORT` before
+launching it.
 
 ---
 
@@ -51,8 +52,8 @@ Wires the shared server to Blender's main thread via `bpy.app.timers`.
 ### Option B — headless / one-off
 
 ```bash
-blender --python plugins/blender_daemon/__init__.py       # claim from pool
-blender --python plugins/blender_daemon/__init__.py -- --port 18811
+blender --python plugins/blender_daemon/__init__.py                         # register with daemon
+blender --python plugins/blender_daemon/__init__.py -- --register-port 8766  # override port
 ```
 
 ---
@@ -149,17 +150,19 @@ the active viewport (GUI only).
 
 ## Running multiple instances
 
-Just launch them — each plugin claims the next free port in the pool
-automatically. The daemon discovers them all; address each by its port.
+Just launch them — each dials the daemon and registers independently. The
+daemon assigns each a distinct `instance_id` (`blender-1`, `blender-2`, …);
+address each by its id.
 
 ## Troubleshooting
 
-- **Not shown in `list_instances`** — plugin not started, or the pool is
-  full / misconfigured. Check the DCC's console for the “socket server
-  listening on …” line.
-- **`reachable: false`** — a listener answered but not our protocol
-  (still starting, or a non-DCC service claimed the port).
-- **`health` says `no_protocol`** — process up but the plugin port isn't
-  answering; re-run the plugin.
-- **“no free port in pool”** — every pool port is taken; widen
-  `ports.dcc` in `~/.dcc-mcp/config.toml`.
+- **Not shown in `list_instances`** — the connector hasn't registered:
+  the daemon wasn't running when the DCC started (it retries with
+  backoff, so check again), or the DCC's console shows a connection
+  error. Confirm `dcc_register_port` matches on both sides.
+- **`connected: false`** — the registration dropped (DCC quit or the
+  socket broke); it will re-register on reconnect.
+- **`health` says `busy`/`hung`** — connected but the main thread isn't
+  answering the heartbeat (heavy compute, modal dialog, or a wedge).
+- **Connector never registers** — verify the daemon is up and reachable
+  at `127.0.0.1:<dcc_register_port>`.

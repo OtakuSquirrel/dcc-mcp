@@ -18,8 +18,7 @@ import traceback
 
 import websockets
 
-from dcc_daemon.adapters.base import DCCError
-from dcc_daemon.core import DaemonCore
+from dcc_daemon.core import DaemonCore, DCCError
 from dcc_daemon.tunnel import protocol as p
 
 logger = logging.getLogger(__name__)
@@ -85,11 +84,11 @@ class TunnelClient:
         if method == "list_instances":
             return self._core.list_instances(refresh=bool(params.get("refresh", False)))
         if method == "execute_python":
-            return self._core.execute_python(int(params["port"]), str(params["code"]))
+            return self._core.execute_python(str(params["instance_id"]), str(params["code"]))
         if method == "health":
-            return self._core.health(int(params["port"]))
+            return self._core.health(str(params["instance_id"]))
         if method == "screenshot":
-            return self._core.screenshot(int(params["port"]))
+            return self._core.screenshot(str(params["instance_id"]))
         raise ValueError(f"unhandled method: {method}")
 
     async def _send(self, ws, frame: dict) -> None:

@@ -17,8 +17,14 @@ logger = logging.getLogger(__name__)
 
 def build_app(mcp_path: str = "/mcp", *, webui: bool = True):
     """Return the ASGI app serving MCP at ``mcp_path`` and, if ``webui``,
-    the dashboard at ``/``."""
-    from dcc_daemon.mcp_server import mcp
+    the dashboard at ``/``. Also starts the DCC registration hub listener
+    so DCCs can dial in."""
+    from dcc_daemon import config
+    from dcc_daemon.mcp_server import core, mcp
+
+    # Start listening for DCC registrations (idempotent).
+    reg_host, reg_port = config.register_bind()
+    core.hub.start(reg_host, reg_port)
 
     if webui:
         try:

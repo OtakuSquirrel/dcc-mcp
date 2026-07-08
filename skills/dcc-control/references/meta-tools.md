@@ -17,29 +17,30 @@ tool schemas.
 
 ## `list_instances(refresh=False)`
 
-Returns a list of running DCCs discovered on the local machine:
+Returns the DCCs currently registered with the daemon:
 
 ```json
-[{"port": 19811, "kind": "blender", "version": "4.2.0",
-  "pid": 12345, "file": "scene.blend", "reachable": true}]
+[{"instance_id": "blender-1", "kind": "blender", "version": "4.2.0",
+  "pid": 12345, "file": "scene.blend", "connected": true}]
 ```
 
-- `kind` ∈ `blender` | `houdini` | `ue` | `null` (unknown).
-- `port` is what every other tool takes.
-- `reachable: false` — a listener is on the port but didn't answer the
-  identity probe (starting up, busy, or not our plugin).
-- Results are cached ~3 s. Pass `refresh=True` to force a rescan (e.g.
-  right after launching a DCC).
+- `kind` ∈ `blender` | `houdini` | `ue` | `maya` | `null` (unknown).
+- `instance_id` is the handle every other tool takes (e.g. `blender-1`).
+- `connected: false` — the registration exists but its connection just
+  dropped; treat as gone.
+- `refresh` is ignored — the registry is always live (DCCs dial in and
+  hold a connection), so there is nothing to re-scan.
 
-Always start here. Never hard-code a port you didn't get from this.
+Always start here. Never hard-code an `instance_id` you didn't get from
+this — ids are assigned by the daemon and change between runs.
 
-## `execute_python(port, code)`
+## `execute_python(instance_id, code)`
 
-Runs `code` inside the DCC on `port`, on that DCC's **main thread**,
+Runs `code` inside the DCC `instance_id`, on that DCC's **main thread**,
 with the DCC's Python API in scope. Returns:
 
 ```json
-{"port": 19811, "result": <whatever you assigned to `result`>}
+{"instance_id": "blender-1", "result": <whatever you assigned to `result`>}
 ```
 
 ### The result contract
@@ -62,37 +63,38 @@ result = {"objects": [o.name for o in bpy.data.objects],
 
 If the code raises inside the DCC, the tool call fails with the
 exception message and a traceback from the DCC process — read it, it's
-the real Python traceback from inside Blender/Houdini/UE. Fix and resend.
-A transport failure (DCC crashed / port closed) surfaces as a connection
-error; re-`list_instances()` to see if the instance is still alive.
+the real Python traceback from inside Blender/Houdini/UE/Maya. Fix and
+resend. A transport failure (DCC disconnected) surfaces as a connection
+error; re-`list_instances()` to see if the instance is still there.
 
 ### Timeouts
 
 Long operations (renders, simulations, bakes) are fine — the call
 returns when the DCC finishes, up to a generous ceiling (~10 min). If a
-call is taking suspiciously long, call `health(port)` from the daemon's
-perspective; it never hangs even when the DCC is frozen.
+call is taking suspiciously long, call `health(instance_id)` from the
+daemon's perspective; it never hangs even when the DCC is frozen.
 
-## `screenshot(port)`
+## `screenshot(instance_id)`
 
 Returns an image (PNG) of the DCC's viewport / latest render so you can
 *see* the result. Use it to verify visual work — framing, materials,
 lighting — that you can't confirm by reading state. The capture
 mechanism is DCC-specific (see each DCC reference).
 
-## `health(port)`
+## `health(instance_id)`
 
-OS-level diagnosis that **never hangs**, even if the DCC is fully frozen.
-Returns a verdict:
+Diagnosis that **never hangs**, even if the DCC is fully frozen. Combines
+the live connection state with a **main-thread heartbeat** (a frozen DCC
+keeps its socket open, so only a main-thread ping reveals the freeze) and
+OS window/CPU signals. Returns a verdict:
 
 | verdict | meaning | what to do |
 |---------|---------|------------|
-| `healthy` | responsive | proceed |
-| `busy` | main thread working (render/sim) or high CPU | wait, retry later |
-| `hung` | unresponsive, low CPU | likely stuck; may need manual/kill |
-| `no_protocol` | process alive, plugin port not answering | plugin not started/loaded |
-| `dead` | nothing on the port | instance gone |
-| `unknown` | port listening, PID undetermined | inspect manually |
+| `healthy` | connected + main thread answered | proceed |
+| `busy` | connected but main thread not answering; high CPU or briefly blocked | wait, retry later |
+| `hung` | connected, main thread silent, window not responding | likely stuck; may need manual/kill |
+| `dead` | no live registration | instance gone |
+| `unknown` | indeterminate | inspect manually |
 
 Reach for this only when `execute_python` misbehaves — for normal work
 you don't need it.
@@ -101,10 +103,10 @@ you don't need it.
 
 ## Multi-instance
 
-Several DCCs (even several of the same kind) can run at once, each on its
-own port. The port is the address; the daemon keeps no "active" instance.
-Track which port maps to which task in your own reasoning and pass it
-explicitly every call.
+Several DCCs (even several of the same kind) can be registered at once,
+each with its own `instance_id` (`blender-1`, `blender-2`, …). The id is
+the address; the daemon keeps no "active" instance. Track which id maps
+to which task in your own reasoning and pass it explicitly every call.
 
 ## What you should NOT do
 

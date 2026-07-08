@@ -7,7 +7,8 @@ thread-safe, so code must run inside a ``bpy.app.timers`` callback.
 
 Install: copy this folder + ``dcc_socket_server.py`` into Blender's
 addons dir as ``dcc_daemon_blender``, enable in Preferences > Add-ons.
-Or launch headless:  blender --python start.py -- --port 19811
+The addon dials the daemon and registers; no port to pick. Or launch
+headless:  blender --python __init__.py -- [--register-port 8766]
 """
 
 from __future__ import annotations
@@ -91,13 +92,12 @@ def _screenshot() -> str:
         return base64.b64encode(f.read()).decode("ascii")
 
 
-def start(port: int | None = None) -> int:
-    """Start the socket server. If ``port`` is given, bind exactly it;
-    otherwise scan the configured pool and claim the first free port.
-    Returns the claimed port."""
+def start(register_port: int | None = None) -> None:
+    """Connect to the daemon and register. If ``register_port`` is given,
+    dial exactly it; otherwise read it from the config file."""
     global _server
     if _server is not None:
-        return _server.port
+        return
     _server = DCCServer(
         kind="blender",
         run_on_main=_run_on_main,
@@ -105,13 +105,9 @@ def start(port: int | None = None) -> int:
         exec_globals=_exec_globals,
         screenshot=_screenshot,
     )
-    if port is not None:
-        _server.start(port)
-    else:
-        _server.claim_and_start()
     if not bpy.app.timers.is_registered(_drain_jobs):
         bpy.app.timers.register(_drain_jobs, first_interval=0.02, persistent=True)
-    return _server.port
+    _server.start(register_port)
 
 
 def stop() -> None:
@@ -124,8 +120,8 @@ def stop() -> None:
 
 
 def register() -> None:
-    # DCC_DAEMON_PORT pins a specific port; otherwise claim from the pool.
-    env = os.environ.get("DCC_DAEMON_PORT")
+    # DCC_DAEMON_REGISTER_PORT overrides the config file's register port.
+    env = os.environ.get("DCC_DAEMON_REGISTER_PORT")
     start(int(env) if env else None)
 
 
@@ -134,7 +130,7 @@ def unregister() -> None:
 
 
 if __name__ == "__main__":
-    # Headless: `blender --python __init__.py -- [--port 19811]`
+    # Headless: `blender --python __init__.py -- [--register-port 8766]`
     argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
-    port = int(argv[argv.index("--port") + 1]) if "--port" in argv else None
-    start(port)
+    rp = int(argv[argv.index("--register-port") + 1]) if "--register-port" in argv else None
+    start(rp)

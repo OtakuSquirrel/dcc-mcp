@@ -61,14 +61,14 @@ _PAGE = """<!doctype html>
 </header>
 <main>
   <div class="row">
-    <button onclick="refresh(true)">Rescan ports</button>
+    <button onclick="refresh(true)">Refresh</button>
     <span class="sub" id="status"></span>
   </div>
   <table>
-    <thead><tr><th>Kind</th><th>Port</th><th>Version</th><th>PID</th><th>File</th><th>Health</th></tr></thead>
+    <thead><tr><th>Kind</th><th>Instance</th><th>Version</th><th>PID</th><th>File</th><th>Health</th></tr></thead>
     <tbody id="rows"></tbody>
   </table>
-  <p class="empty" id="empty" hidden>No DCC instances discovered. Start one and enable its dcc-daemon plugin.</p>
+  <p class="empty" id="empty" hidden>No DCC instances registered. Start a DCC with its dcc-daemon plugin.</p>
   <div class="foot">
     Agents connect with <code>{"type":"http","url":"http://HOST:PORT/mcp"}</code>.
     Page auto-refreshes every 5&nbsp;s.
@@ -76,10 +76,11 @@ _PAGE = """<!doctype html>
 </main>
 <script>
 const KIND_COLOR = __KIND_COLOR__;
-async function refresh(rescan) {
+function idAttr(s){ return String(s).replace(/[^a-zA-Z0-9_-]/g,'_'); }
+async function refresh(force) {
   const s = document.getElementById('status');
-  s.textContent = rescan ? 'rescanning…' : '';
-  const r = await fetch('api/instances' + (rescan ? '?refresh=1' : ''));
+  s.textContent = force ? 'refreshing…' : '';
+  const r = await fetch('api/instances');
   const data = await r.json();
   const rows = document.getElementById('rows');
   document.getElementById('count').textContent = data.length + ' instance' + (data.length===1?'':'s');
@@ -88,14 +89,15 @@ async function refresh(rescan) {
   for (const i of data) {
     const tr = document.createElement('tr');
     const color = KIND_COLOR[i.kind] || '#556';
+    const hid = 'h' + idAttr(i.instance_id);
     tr.innerHTML =
       `<td><span class="kind" style="background:${color}">${i.kind||'?'}</span></td>`+
-      `<td>${i.port}</td><td>${i.version||'—'}</td><td>${i.pid??'—'}</td>`+
+      `<td>${i.instance_id}</td><td>${i.version||'—'}</td><td>${i.pid??'—'}</td>`+
       `<td title="${i.file||''}">${(i.file||'—').split(/[\\\\/]/).pop()}</td>`+
-      `<td class="verdict" id="h${i.port}">…</td>`;
+      `<td class="verdict" id="${hid}">…</td>`;
     rows.appendChild(tr);
-    fetch('api/health/'+i.port).then(x=>x.json()).then(h=>{
-      const cell = document.getElementById('h'+i.port);
+    fetch('api/health/'+encodeURIComponent(i.instance_id)).then(x=>x.json()).then(h=>{
+      const cell = document.getElementById(hid);
       if (cell) { cell.textContent = h.verdict; cell.className = 'verdict '+h.verdict; }
     }).catch(()=>{});
   }
@@ -118,11 +120,10 @@ async def _api_instances(request: Request) -> JSONResponse:
 
 
 async def _api_health(request: Request) -> JSONResponse:
-    try:
-        port = int(request.path_params["port"])
-    except (KeyError, ValueError):
-        return JSONResponse({"error": "bad port"}, status_code=400)
-    return JSONResponse(core.health(port))
+    instance_id = request.path_params.get("instance_id")
+    if not instance_id:
+        return JSONResponse({"error": "bad instance_id"}, status_code=400)
+    return JSONResponse(core.health(instance_id))
 
 
 def register_webui() -> None:
@@ -133,4 +134,4 @@ def register_webui() -> None:
     """
     mcp.custom_route("/", methods=["GET"])(_index)
     mcp.custom_route("/api/instances", methods=["GET"])(_api_instances)
-    mcp.custom_route("/api/health/{port}", methods=["GET"])(_api_health)
+    mcp.custom_route("/api/health/{instance_id}", methods=["GET"])(_api_health)

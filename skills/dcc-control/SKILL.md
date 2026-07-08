@@ -15,10 +15,10 @@ and `unreal`. Treat this like a Python REPL attached to a live DCC.
 
 | Tool | What it's for |
 |------|---------------|
-| `list_instances()` | Find running DCCs → each has a `port` and `kind` |
-| `execute_python(port, code)` | **The workhorse.** Run Python in that DCC |
-| `screenshot(port)` | See the viewport/render as an image |
-| `health(port)` | Diagnose a stuck/frozen instance (never hangs) |
+| `list_instances()` | Find running DCCs → each has an `instance_id` and `kind` |
+| `execute_python(instance_id, code)` | **The workhorse.** Run Python in that DCC |
+| `screenshot(instance_id)` | See the viewport/render as an image |
+| `health(instance_id)` | Diagnose a stuck/frozen instance (never hangs) |
 
 These four are the *entire* interface. `list_instances`, `screenshot`,
 and `health` are infrastructure; **everything creative or inspective is

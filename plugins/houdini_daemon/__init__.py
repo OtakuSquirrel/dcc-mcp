@@ -5,7 +5,8 @@ Wires the shared, DCC-agnostic ``DCCServer`` (from
 
 Houdini used to be driven over RPyC (``hrpyc``); it now uses the same
 embedded socket server as every other DCC, so all four speak one
-protocol on one port pool and the daemon needs no Houdini-special case.
+protocol and the daemon needs no Houdini-special case. It dials the
+daemon and registers; no port to pick.
 The only Houdini-specific piece is ``run_on_main``: ``hou`` is not
 thread-safe, so code must run on the main thread — Houdini provides
 ``hdefereval.executeInMainThreadWithResult`` for exactly this (the
@@ -72,12 +73,12 @@ def _screenshot() -> str:
         return base64.b64encode(f.read()).decode("ascii")
 
 
-def start(port: int | None = None) -> int:
-    """Start the socket server. Pin ``port`` if given, else claim the
-    first free port from the configured pool. Returns the claimed port."""
+def start(register_port: int | None = None) -> None:
+    """Connect to the daemon and register. Dial ``register_port`` if
+    given, else read it from the config file."""
     global _server
     if _server is not None:
-        return _server.port
+        return
     _server = DCCServer(
         kind="houdini",
         run_on_main=_run_on_main,
@@ -85,11 +86,7 @@ def start(port: int | None = None) -> int:
         exec_globals=_exec_globals,
         screenshot=_screenshot,
     )
-    if port is not None:
-        _server.start(port)
-    else:
-        _server.claim_and_start()
-    return _server.port
+    _server.start(register_port)
 
 
 def stop() -> None:
@@ -100,5 +97,5 @@ def stop() -> None:
 
 
 if __name__ == "__main__":
-    env = os.environ.get("DCC_DAEMON_PORT")
+    env = os.environ.get("DCC_DAEMON_REGISTER_PORT")
     start(int(env) if env else None)

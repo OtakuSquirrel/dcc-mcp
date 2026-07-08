@@ -1,8 +1,8 @@
 """End-to-end tunnel test — relay + daemon client + fake DCC + agent.
 
 Runs the real relay and real daemon-side TunnelClient in-process over a
-loopback WebSocket, with a fake DCC (the shared DCCServer) behind the
-daemon. Verifies:
+loopback WebSocket. Behind the daemon is a real RegistrationHub with a
+fake DCC (the shared DCCServer) dialed into it. Verifies:
   * token auth (daemon accepted, agent accepted, bad tokens rejected),
   * a full agent → relay → daemon → DCC → back round-trip,
   * DCC error propagation across the tunnel,
@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import queue
+import socket
 import threading
 import time
 
@@ -21,20 +22,29 @@ import websockets
 
 from dcc_socket_server import DCCServer, default_info
 from dcc_daemon.core import DaemonCore
+from dcc_daemon.hub import RegistrationHub
 from dcc_daemon.tunnel import protocol as p
 from dcc_daemon.tunnel.client import TunnelClient
 from dcc_daemon.tunnel.relay import Relay
 from dcc_daemon.tunnel.tokens import TokenStore
 
-_DCC_PORT = 18815  # within the default pool so discovery scans it
 _DAEMON_ID = "dccbox-test"
 
 
+def _free_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
 @pytest.fixture
-def fake_dcc(monkeypatch):
-    # Pin the scanned pool to this port so list_instances is deterministic
-    # regardless of the machine's ~/.dcc-mcp/config.toml.
-    monkeypatch.setattr("dcc_daemon.registry.config.dcc_ports", lambda: [_DCC_PORT])
+def hub_with_dcc():
+    """Real hub + a fake DCC registered into it; yield (core, instance_id)."""
+    hub = RegistrationHub()
+    reg_port = _free_port()
+    hub.start("127.0.0.1", reg_port)
+    core = DaemonCore(hub=hub)
+
     jobs: "queue.Queue[tuple]" = queue.Queue()
     stop = threading.Event()
 
@@ -67,11 +77,22 @@ def fake_dcc(monkeypatch):
         get_info=lambda: default_info("blender", "4.2.0", "scene.blend"),
         exec_globals=lambda: {"STATE": {"n": 41}},
     )
-    server.start(_DCC_PORT)
-    time.sleep(0.2)
-    yield
+    server.start(reg_port)
+
+    instance_id = None
+    for _ in range(100):
+        insts = core.list_instances()
+        if insts:
+            instance_id = insts[0]["instance_id"]
+            break
+        time.sleep(0.05)
+    assert instance_id, "DCC did not register"
+
+    yield core, instance_id
+
     server.stop()
     stop.set()
+    hub.stop()
 
 
 async def _agent_call(url, access_token, method, params, req_id=1):
@@ -85,33 +106,30 @@ async def _agent_call(url, access_token, method, params, req_id=1):
         return p.decode(await ws.recv())
 
 
-async def _run_scenario():
-    # Provision tokens in-memory.
+async def _run_scenario(core, instance_id):
     store = TokenStore(data={"daemons": {}})
     _, pair_token = store.register_daemon(_DAEMON_ID)
     access_token = store.issue_access_token(_DAEMON_ID)
 
-    # Start the relay on an ephemeral loopback port.
     relay = Relay(store)
     server = await websockets.serve(relay.handle, "127.0.0.1", 0)
     port = server.sockets[0].getsockname()[1]
     url = f"ws://127.0.0.1:{port}"
 
-    # Start the daemon-side tunnel client.
-    tc = TunnelClient(url, _DAEMON_ID, pair_token, core=DaemonCore())
+    tc = TunnelClient(url, _DAEMON_ID, pair_token, core=core)
     tc_task = asyncio.create_task(tc.run_forever())
-    await asyncio.sleep(0.4)  # let the daemon register
+    await asyncio.sleep(0.4)  # let the daemon connect to the relay
 
     results = {}
     try:
         results["exec"] = await _agent_call(
             url, access_token, "execute_python",
-            {"port": _DCC_PORT, "code": "result = STATE['n'] + 1"})
+            {"instance_id": instance_id, "code": "result = STATE['n'] + 1"})
         results["list"] = await _agent_call(
-            url, access_token, "list_instances", {"refresh": True}, req_id=2)
+            url, access_token, "list_instances", {}, req_id=2)
         results["err"] = await _agent_call(
             url, access_token, "execute_python",
-            {"port": _DCC_PORT, "code": "raise ValueError('boom')"}, req_id=3)
+            {"instance_id": instance_id, "code": "raise ValueError('boom')"}, req_id=3)
         results["badtoken"] = await _agent_call(
             url, "wrong-token", "list_instances", {}, req_id=4)
     finally:
@@ -125,16 +143,17 @@ async def _run_scenario():
     return results
 
 
-def test_tunnel_end_to_end(fake_dcc):
-    r = asyncio.run(_run_scenario())
+def test_tunnel_end_to_end(hub_with_dcc):
+    core, instance_id = hub_with_dcc
+    r = asyncio.run(_run_scenario(core, instance_id))
 
     # round-trip result
     assert r["exec"]["id"] == 1
-    assert r["exec"]["result"] == {"port": _DCC_PORT, "result": 42}
+    assert r["exec"]["result"] == {"instance_id": instance_id, "result": 42}
 
     # list_instances routed back to the right request id
     assert r["list"]["id"] == 2
-    assert any(i["port"] == _DCC_PORT for i in r["list"]["result"])
+    assert any(i["instance_id"] == instance_id for i in r["list"]["result"])
 
     # DCC error propagated across the tunnel with traceback
     assert r["err"]["id"] == 3

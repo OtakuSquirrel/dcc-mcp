@@ -1,20 +1,30 @@
-"""Unified minimal socket server for DCC plugins.
+"""Unified DCC-side connector for the dcc-daemon (registration model).
 
-Every DCC (Blender, Houdini, Unreal) embeds this same server. It speaks
-newline-delimited JSON and implements exactly four commands:
+Every DCC (Blender, Houdini, Unreal, Maya) embeds this. On launch it
+**dials the daemon** (outbound TCP to the daemon's DCC-register port),
+registers itself, and holds one long connection. The daemon then pushes
+request frames down that connection; this connector runs them on the
+DCC's main thread and replies. When the connection drops (daemon
+restart, network blip) it reconnects with backoff.
 
-    ping         -> "pong"
-    get_info     -> {"kind","version","pid","file", ...}
-    execute_python -> runs code, returns whatever it sets as `result`
-    screenshot   -> {"png_base64": "..."}
+This inverts the old model — the DCC no longer listens on a port and the
+daemon no longer scans. One held connection per DCC; the daemon keeps a
+live registry keyed by a daemon-assigned instance id.
 
-The one thing that differs per DCC is HOW code reaches the main thread
-(bpy.app.timers vs hdefereval vs UE tick). The host passes in a
-``run_on_main`` callable that takes a 0-arg function and returns its
-result synchronously; everything else is shared.
+Wire (newline-delimited JSON, both directions):
 
-This module has NO DCC imports — it is pure stdlib so it can be vendored
-into any DCC's Python environment.
+    DCC → daemon (once, on connect):
+        {"type":"register","kind","pid","version","file"}
+    daemon → DCC (reply):
+        {"type":"registered","instance_id":"..."}
+    daemon → DCC (per request):
+        {"id":N,"command":"execute_python","params":{"code":"..."}}
+    DCC → daemon (reply, tagged by id):
+        {"id":N,"result":...}  |  {"id":N,"error":"...","traceback":"..."}
+
+The one thing that differs per DCC is ``run_on_main`` (how code reaches
+the main thread); everything here is shared and pure stdlib so it can be
+vendored into any DCC's Python environment.
 """
 
 from __future__ import annotations
@@ -24,13 +34,24 @@ import logging
 import os
 import socket
 import threading
+import time
 import traceback
 from typing import Any, Callable
 
 logger = logging.getLogger("dcc_daemon.plugin")
 
+_RECONNECT_START = 1.0
+_RECONNECT_MAX = 15.0
+_RECV_SIZE = 1024 * 1024
+
 
 class DCCServer:
+    """Connects to the daemon, registers, and serves pushed requests.
+
+    (Name kept for continuity; it "serves" execute_python requests, now
+    over a reversed, daemon-initiated connection.)
+    """
+
     def __init__(
         self,
         *,
@@ -43,14 +64,13 @@ class DCCServer:
     ):
         """
         Args:
-            kind: "blender" | "houdini" | "ue".
-            run_on_main: schedule fn on the DCC main thread, return its result.
-            get_info: returns identity dict (runs on main thread).
-            screenshot: returns base64 PNG (runs on main thread). Optional.
-            exec_globals: returns the globals dict for execute_python
-                (e.g. {"bpy": bpy}). Runs on main thread.
-            host: bind host — keep 127.0.0.1; the daemon reaches DCCs
-                locally, cloud access goes through the daemon tunnel.
+            kind: "blender" | "houdini" | "ue" | "maya".
+            run_on_main: schedule fn on the DCC main thread, return result.
+            get_info: identity dict (runs on main thread).
+            screenshot: base64 PNG (runs on main thread). Optional.
+            exec_globals: globals dict for execute_python (e.g. {"bpy": bpy}).
+            host: daemon host — keep 127.0.0.1; remote access is via the
+                daemon's own tunnel, never a DCC listening publicly.
         """
         self.kind = kind
         self._run_on_main = run_on_main
@@ -58,99 +78,119 @@ class DCCServer:
         self._screenshot = screenshot
         self._exec_globals = exec_globals or (lambda: {})
         self.host = host
-        self._server_sock: socket.socket | None = None
+        self._sock: socket.socket | None = None
         self._running = False
-        self._threads: list[threading.Thread] = []
-        self.port: int | None = None
+        self.instance_id: str | None = None
+        self.connected = False
 
     # ── lifecycle ──
 
-    def start(self, port: int) -> None:
+    def start(self, register_port: int | None = None) -> None:
+        """Begin connecting to the daemon in a background thread."""
         if self._running:
             return
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        # NOTE: no SO_REUSEADDR — we WANT bind() to fail on a port another
-        # instance already holds, so claim_and_start can move to the next.
-        sock.bind((self.host, port))
-        sock.listen(8)
-        self._server_sock = sock
         self._running = True
-        self.port = port
-        t = threading.Thread(target=self._accept_loop, name="dcc-mcp-accept", daemon=True)
+        port = register_port if register_port is not None else read_register_port()
+        t = threading.Thread(
+            target=self._connect_loop, args=(port,),
+            name="dcc-daemon-conn", daemon=True)
         t.start()
-        self._threads.append(t)
-        logger.info("[%s] socket server listening on %s:%d", self.kind, self.host, port)
-
-    def claim_and_start(self, ports: list[int] | None = None) -> int:
-        """Scan a pool of ports and bind the first free one.
-
-        This is how a DCC plugin picks its port at launch: read the pool
-        (from ``~/.dcc-mcp/config.toml`` if ``ports`` is None), try each
-        in order, and hold the first that binds. Returns the claimed port;
-        raises RuntimeError if the whole pool is taken.
-        """
-        pool = ports if ports is not None else read_dcc_ports()
-        for port in pool:
-            try:
-                self.start(port)
-                return port
-            except OSError:
-                continue  # taken by another instance; try the next
-        raise RuntimeError(f"[{self.kind}] no free port in pool {pool}")
 
     def stop(self) -> None:
         self._running = False
-        self.port = None
-        if self._server_sock is not None:
+        self.connected = False
+        if self._sock is not None:
             try:
-                self._server_sock.close()
+                self._sock.close()
             except OSError:
                 pass
-            self._server_sock = None
+            self._sock = None
 
-    # ── networking (background threads; only exec hops to main thread) ──
+    # ── connection with reconnect/backoff ──
 
-    def _accept_loop(self) -> None:
-        while self._running and self._server_sock is not None:
+    def _connect_loop(self, register_port: int) -> None:
+        backoff = _RECONNECT_START
+        while self._running:
             try:
-                client, _ = self._server_sock.accept()
+                self._session(register_port)
+                backoff = _RECONNECT_START  # clean drop → reset
+            except OSError as e:
+                logger.debug("[%s] connect failed (%s)", self.kind, e)
+            if not self._running:
+                break
+            time.sleep(backoff)
+            backoff = min(backoff * 2, _RECONNECT_MAX)
+
+    def _session(self, register_port: int) -> None:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(10)
+        sock.connect((self.host, register_port))
+        sock.settimeout(None)
+        self._sock = sock
+
+        # Register — gather identity on the main thread.
+        info = self._run_on_main(self._get_info)
+        hello = {"type": "register", **info}
+        sock.sendall((json.dumps(hello) + "\n").encode("utf-8"))
+
+        buffer = b""
+        while self._running:
+            # Read at least the registration reply, then request frames.
+            try:
+                chunk = sock.recv(_RECV_SIZE)
             except OSError:
                 break
-            ct = threading.Thread(target=self._client_loop, args=(client,), daemon=True)
-            ct.start()
-            self._threads.append(ct)
-
-    def _client_loop(self, client: socket.socket) -> None:
-        buffer = b""
-        with client:
-            while self._running:
-                try:
-                    chunk = client.recv(1024 * 1024)
-                except OSError:
-                    break
-                if not chunk:
-                    break
-                buffer += chunk
-                while b"\n" in buffer:
-                    line, buffer = buffer.split(b"\n", 1)
-                    if not line.strip():
-                        continue
-                    response = self._handle(line.decode("utf-8"))
-                    try:
-                        client.sendall((json.dumps(response) + "\n").encode("utf-8"))
-                    except OSError:
-                        return
-
-    def _handle(self, raw: str) -> dict:
+            if not chunk:
+                break
+            buffer += chunk
+            while b"\n" in buffer:
+                line, buffer = buffer.split(b"\n", 1)
+                if not line.strip():
+                    continue
+                self._on_frame(sock, line.decode("utf-8"))
+        self.connected = False
+        self.instance_id = None
         try:
-            request = json.loads(raw)
-        except json.JSONDecodeError as e:
-            return {"error": f"invalid JSON: {e}"}
+            sock.close()
+        except OSError:
+            pass
+        self._sock = None
+
+    def _on_frame(self, sock: socket.socket, raw: str) -> None:
+        try:
+            frame = json.loads(raw)
+        except json.JSONDecodeError:
+            return
+        if frame.get("type") == "registered":
+            self.instance_id = frame.get("instance_id")
+            self.connected = True
+            logger.info("[%s] registered with daemon as %s", self.kind, self.instance_id)
+            return
+        # A request frame: handle in its own thread so a long execute or a
+        # wedged main thread never blocks reading the next request (e.g. a
+        # health heartbeat the daemon sends concurrently).
+        threading.Thread(
+            target=self._serve_request, args=(sock, frame), daemon=True).start()
+
+    def _serve_request(self, sock: socket.socket, frame: dict) -> None:
+        req_id = frame.get("id")
+        response = self._handle(frame)
+        response["id"] = req_id
+        try:
+            sock.sendall((json.dumps(response) + "\n").encode("utf-8"))
+        except OSError:
+            pass
+
+    # ── request handling (unchanged dispatch; runs code on main thread) ──
+
+    def _handle(self, request: dict) -> dict:
         command = request.get("command", "")
         params = request.get("params") or {}
         try:
             if command == "ping":
-                return {"result": "pong"}
+                # Heartbeat that touches the MAIN THREAD, so a wedged DCC
+                # fails it (the network thread alone would falsely pass).
+                return {"result": self._run_on_main(lambda: "pong")}
             if command == "get_info":
                 return {"result": self._run_on_main(self._get_info)}
             if command == "execute_python":
@@ -182,42 +222,29 @@ def default_info(kind: str, version: str, file: str = "") -> dict:
     return {"kind": kind, "version": version, "pid": os.getpid(), "file": file}
 
 
-# Default pool — must match dcc_daemon.config.DEFAULT_DCC_PORTS.
-_DEFAULT_DCC_PORTS = list(range(18811, 18831))
+# Default register port — must match dcc_daemon.config.DEFAULT_REGISTER_PORT.
+_DEFAULT_REGISTER_PORT = 8766
 
 
-def read_dcc_ports() -> list[int]:
-    """Read the DCC port pool from ``~/.dcc-mcp/config.toml``.
+def read_register_port() -> int:
+    """Read the daemon's DCC-register port from ``~/.dcc-mcp/config.toml``.
 
     Pure stdlib (``tomllib``, Python 3.11+, which every current DCC ships)
-    so this file stays vendorable into any DCC. Accepts an explicit
-    ``ports.dcc = [...]`` list or a ``ports.min``/``ports.max`` range.
-    Falls back to the default block if the file is missing/malformed —
-    keeping this in lock-step with dcc_daemon.config.dcc_ports().
+    so this file stays vendorable into any DCC. Falls back to the default
+    if the file is missing/malformed — in lock-step with
+    dcc_daemon.config.register_port().
     """
-    import os.path
-
     path = os.path.expanduser("~/.dcc-mcp/config.toml")
     if not os.path.exists(path):
-        return list(_DEFAULT_DCC_PORTS)
+        return _DEFAULT_REGISTER_PORT
     try:
         import tomllib
         with open(path, "rb") as f:
             data = tomllib.load(f)
-    except Exception:  # noqa: BLE001 — any read/parse error → defaults
-        return list(_DEFAULT_DCC_PORTS)
-    p = data.get("ports") or {}
-    raw = p.get("dcc")
-    if isinstance(raw, list) and raw:
-        try:
-            return [int(x) for x in raw]
-        except (TypeError, ValueError):
-            return list(_DEFAULT_DCC_PORTS)
-    if "min" in p and "max" in p:
-        try:
-            lo, hi = int(p["min"]), int(p["max"])
-            if lo <= hi:
-                return list(range(lo, hi + 1))
-        except (TypeError, ValueError):
-            pass
-    return list(_DEFAULT_DCC_PORTS)
+    except Exception:  # noqa: BLE001 — any read/parse error → default
+        return _DEFAULT_REGISTER_PORT
+    d = data.get("daemon") or {}
+    try:
+        return int(d.get("dcc_register_port", _DEFAULT_REGISTER_PORT))
+    except (TypeError, ValueError):
+        return _DEFAULT_REGISTER_PORT

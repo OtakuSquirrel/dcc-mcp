@@ -1,13 +1,12 @@
-"""End-to-end tests for the daemon using a fake in-process DCC.
+"""End-to-end tests for the daemon in the registration model.
 
-The fake DCC runs the real shared ``DCCServer`` with a queue-based
-main-thread simulation, so these exercise the actual wire protocol,
-transport pool, registry discovery, health, and error propagation —
-everything except a real bpy/hou/unreal/maya runtime.
+A fake DCC runs the real shared ``DCCServer`` (from ``plugins/common/``),
+which dials a real ``RegistrationHub`` on loopback, registers, and serves
+pushed requests — exercising the actual wire protocol, hub routing,
+request multiplexing, health, and error propagation, everything except a
+real bpy/hou/unreal/maya runtime.
 
-Parametrized over all four DCC kinds. Every DCC now speaks the same
-JSON socket protocol on one port pool, so the same suite validates all
-of them; ``kind`` is whatever the plugin self-reports via ``get_info``.
+Parametrized over all four DCC kinds (one protocol for all).
 """
 
 from __future__ import annotations
@@ -21,26 +20,35 @@ import pytest
 
 from dcc_socket_server import DCCServer, default_info
 from dcc_daemon.core import DaemonCore
+from dcc_daemon.hub import RegistrationHub
 
-# (kind, port, version). All four use the same JSON adapter; ports are
-# within the default pool (18811-18830) so discovery scans them. kind is
-# self-reported by the plugin.
 _CASES = [
-    ("blender", 18811, "4.2.0"),
-    ("houdini", 18812, "20.5.0"),
-    ("ue", 18813, "5.4.0"),
-    ("maya", 18814, "2025"),
+    ("blender", "4.2.0"),
+    ("houdini", "20.5.0"),
+    ("ue", "5.4.0"),
+    ("maya", "2025"),
 ]
 
 
-@pytest.fixture(params=_CASES, ids=lambda c: c[0])
-def fake_dcc(request, monkeypatch):
-    """Start a fake DCC on a test port; yield (core, port, state, kind, version).
+def _free_port() -> int:
+    import socket
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
 
-    Pins the daemon's scanned pool to just this port so discovery is
-    deterministic regardless of the machine's ~/.dcc-mcp/config.toml."""
-    kind, port, version = request.param
-    monkeypatch.setattr("dcc_daemon.registry.config.dcc_ports", lambda: [port])
+
+@pytest.fixture(params=_CASES, ids=lambda c: c[0])
+def fake_dcc(request):
+    """Start a hub + a fake DCC that registers; yield (core, instance_id, state, kind, version)."""
+    kind, version = request.param
+
+    # Real hub listening on an ephemeral port.
+    hub = RegistrationHub()
+    reg_port = _free_port()
+    hub.start("127.0.0.1", reg_port)
+    core = DaemonCore(hub=hub)
+
+    # Fake DCC main-thread bridge (queue + worker, like bpy.app.timers).
     jobs: "queue.Queue[tuple]" = queue.Queue()
     stop_flag = threading.Event()
 
@@ -66,8 +74,7 @@ def fake_dcc(request, monkeypatch):
             finally:
                 ev.set()
 
-    t = threading.Thread(target=main_loop, daemon=True)
-    t.start()
+    threading.Thread(target=main_loop, daemon=True).start()
 
     state = {"objects": ["Cube"]}
     server = DCCServer(
@@ -77,65 +84,79 @@ def fake_dcc(request, monkeypatch):
         exec_globals=lambda: {"STATE": state},
         screenshot=lambda: "aVZCT1J3MEtHZ28=",
     )
-    server.start(port)
-    time.sleep(0.2)
+    server.start(reg_port)  # dial the hub
 
-    yield DaemonCore(), port, state, kind, version
+    # Wait for registration to land.
+    instance_id = None
+    for _ in range(100):
+        insts = core.list_instances()
+        if insts:
+            instance_id = insts[0]["instance_id"]
+            break
+        time.sleep(0.05)
+    assert instance_id, "DCC did not register in time"
+
+    yield core, instance_id, state, kind, version
 
     server.stop()
     stop_flag.set()
+    hub.stop()
+
+
+def test_registration_metadata(fake_dcc):
+    core, iid, _, kind, version = fake_dcc
+    inst = next(i for i in core.list_instances() if i["instance_id"] == iid)
+    assert inst["kind"] == kind
+    assert inst["version"] == version
+    assert inst["pid"] == os.getpid()
+    assert inst["connected"] is True
+    assert iid == f"{kind}-1"
 
 
 def test_get_info(fake_dcc):
-    core, port, _, kind, version = fake_dcc
-    info = core.get_info(port)
+    core, iid, _, kind, version = fake_dcc
+    info = core.get_info(iid)
     assert info["kind"] == kind
     assert info["version"] == version
-    assert info["pid"] == os.getpid()
 
 
 def test_execute_python_returns_result(fake_dcc):
-    core, port, *_ = fake_dcc
-    out = core.execute_python(port, "result = STATE['objects'] + ['Sphere']")
-    assert out == {"port": port, "result": ["Cube", "Sphere"]}
+    core, iid, *_ = fake_dcc
+    out = core.execute_python(iid, "result = STATE['objects'] + ['Sphere']")
+    assert out == {"instance_id": iid, "result": ["Cube", "Sphere"]}
 
 
 def test_execute_python_mutates_state(fake_dcc):
-    core, port, state, *_ = fake_dcc
-    core.execute_python(port, "STATE['objects'].append('Light')")
+    core, iid, state, *_ = fake_dcc
+    core.execute_python(iid, "STATE['objects'].append('Light')")
     assert state["objects"] == ["Cube", "Light"]
 
 
 def test_health_verdict(fake_dcc):
-    core, port, *_ = fake_dcc
-    h = core.health(port)
+    core, iid, *_ = fake_dcc
+    h = core.health(iid)
     assert h["verdict"] == "healthy"
-    assert h["protocol_responsive"] is True
+    assert h["connected"] is True
+    assert h["responsive"] is True
 
 
 def test_screenshot_base64(fake_dcc):
-    core, port, *_ = fake_dcc
-    b64 = core.screenshot(port)
-    assert b64 == "aVZCT1J3MEtHZ28="
-
-
-def test_list_instances_discovers(fake_dcc):
-    core, port, _, kind, _ = fake_dcc
-    found = [i for i in core.list_instances(refresh=True) if i["port"] == port]
-    assert found and found[0]["kind"] == kind
+    core, iid, *_ = fake_dcc
+    assert core.screenshot(iid) == "aVZCT1J3MEtHZ28="
 
 
 def test_error_propagation(fake_dcc):
-    from dcc_daemon.transport import DCCError
-    core, port, *_ = fake_dcc
+    from dcc_daemon.core import DCCError
+    core, iid, *_ = fake_dcc
     with pytest.raises(DCCError) as ei:
-        core.execute_python(port, "raise ValueError('boom')")
+        core.execute_python(iid, "raise ValueError('boom')")
     assert "boom" in str(ei.value)
-    assert ei.value.traceback  # plugin sent a traceback
+    assert ei.value.traceback
 
 
-def test_unknown_command_errors(fake_dcc):
-    from dcc_daemon.transport import DCCError
-    core, port, *_ = fake_dcc
-    with pytest.raises(DCCError):
-        core.transport._get_or_open(port)._send("frobnicate")
+def test_disconnect_drops_instance(fake_dcc):
+    core, iid, _, _, _ = fake_dcc
+    # health of an unknown instance is 'dead', not an exception
+    dead = core.health("nope-9")
+    assert dead["verdict"] == "dead"
+    assert dead["connected"] is False
