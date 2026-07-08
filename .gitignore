@@ -16,6 +16,9 @@ venv/
 .mypy_cache/
 *.log
 .codex/
+# Relay token stores — secrets, never commit.
+*tokens.json
+_relay_tokens.json
 # Claude Code worktrees live under the repo but are managed by the harness;
 # never commit their checked-out content into the main repo.
 .claude/worktrees/

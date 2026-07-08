@@ -14,10 +14,12 @@ dependencies = [
     "rpyc>=6.0",
     "uvicorn>=0.29",
     "starlette>=0.37",
+    "websockets>=13.0",
 ]
 
 [project.scripts]
 dcc-daemon = "dcc_daemon.__main__:main"
+dcc-relay = "dcc_daemon.relay_main:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["dcc_daemon"]

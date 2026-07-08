@@ -302,6 +302,7 @@ dependencies = [
     { name = "rpyc" },
     { name = "starlette" },
     { name = "uvicorn" },
+    { name = "websockets" },
 ]
 
 [package.metadata]
@@ -310,6 +311,7 @@ requires-dist = [
     { name = "rpyc", specifier = ">=6.0" },
     { name = "starlette", specifier = ">=0.37" },
     { name = "uvicorn", specifier = ">=0.29" },
+    { name = "websockets", specifier = ">=13.0" },
 ]
 
 [[package]]

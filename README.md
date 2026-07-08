@@ -92,26 +92,61 @@ packages/daemon/            the daemon
     registry.py             discovers live instances by scanning ports
     health.py               OS-level, never-hangs health checks
     mcp_server.py           the 4 meta-tools over MCP/HTTP
+    webui/                  monitoring dashboard (mounted on the MCP app)
+    tunnel/                 cloud reverse tunnel: protocol + relay + client + tokens
+    app.py                  builds the ASGI app (MCP + WebUI)
     __main__.py             `dcc-daemon` entry point
+    relay_main.py           `dcc-relay` entry point
   tests/                    e2e tests against real protocol stand-ins
 plugins/common/             DCC-agnostic socket server, vendored per DCC
 plugins/blender_daemon/     Blender addon wiring the socket server to bpy
+plugins/ue_daemon/          Unreal script wiring the socket server to the game thread
 ```
+
+## Remote agents (cloud tunnel)
+
+A home daemon behind NAT has no public IP and opens no ports. To let a
+remote agent reach it, both the daemon and the agent dial **out** to a
+relay you deploy; the relay pairs them by `daemon_id` and forwards frames.
+It executes nothing.
+
+```
+ cloud agent ──WSS(access_token)──▶  relay  ◀──WSS(pair_token)── home daemon ─▶ DCCs
+```
+
+```bash
+# On the relay host (public):
+dcc-relay add-daemon --tokens tokens.json           # -> daemon_id + pair_token
+dcc-relay add-agent  --tokens tokens.json --daemon-id dccbox-...  # -> access_token
+dcc-relay serve      --tokens tokens.json --certfile … --keyfile …
+
+# On the home machine:
+dcc-daemon --relay-url wss://relay.example/ --daemon-id dccbox-... --pair-token …
+```
+
+The agent side needs only the `daemon_id` + `access_token`. Two token
+types: `pair_token` authenticates a daemon to the relay; `access_token`
+authorizes an agent for one daemon. Both compared with `hmac.compare_digest`.
 
 ## Testing
 
 Tests cannot launch real DCCs, so they **stand in the DCC end with the
 real protocol**, exercising the daemon's actual code paths:
 
-- `tests/test_e2e.py` — runs the real `DCCServer` from
-  `plugins/common/` over a real TCP socket, with a queue simulating the
-  DCC main thread. Covers the Blender/UE (JSON) path.
+- `tests/test_e2e.py` — runs the real `DCCServer` from `plugins/common/`
+  over a real TCP socket, parametrized over Blender- and UE-range ports.
+  Covers the JSON path for both.
 - `tests/test_rpyc_adapter.py` — runs a real `rpyc.classic` slave on a
   Houdini-range port. Covers the Houdini (RPyC) path, including the
   no-`hou` graceful-degradation case.
+- `tests/test_webui.py` — the dashboard + JSON APIs via Starlette's
+  TestClient.
+- `tests/test_tunnel.py` — the real relay + daemon tunnel client + a fake
+  DCC + an agent, over loopback WebSockets: token auth (accept + reject)
+  and a full agent→relay→daemon→DCC round-trip with error propagation.
 
 ```bash
-uv run pytest packages/daemon/tests/   # 16 tests
+uv run pytest packages/daemon/tests/   # 31 tests
 uv run ruff check packages/ plugins/
 ```
 
@@ -121,12 +156,12 @@ manually against running DCCs.
 
 ## Status
 
-- **Done:** daemon core, transport with JSON + RPyC adapters, instance
-  discovery, health checks, MCP-over-HTTP ingress, Blender plugin, tests.
-- **Next:** Unreal adapter/plugin; a monitoring WebUI with plugin-install
-  guides; an outbound WebSocket tunnel + relay + token auth so remote
-  agents can reach a home machine's daemon. Ingress is already unified in
-  `DaemonCore`, so the remote path is "add another door," not a rewrite.
+- **Done:** daemon core; transport with JSON + RPyC adapters; instance
+  discovery; health checks; MCP-over-HTTP ingress; Blender + Unreal
+  plugins (Houdini via hot-pluggable RPyC); monitoring WebUI; outbound
+  WebSocket tunnel + relay + token auth for remote agents; tests.
+- **Next:** plugin-install guides in the WebUI; DCC-side skills; hardening
+  the tunnel (rate limits, token rotation) for real deployment.
 
 ## License
 
