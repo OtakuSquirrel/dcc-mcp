@@ -1,0 +1,31 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "dcc-daemon"
+version = "0.1.0"
+description = "Unified local daemon that routes agent requests (local MCP-over-HTTP + cloud WebSocket) to DCC instances via a single execute_python channel."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.11"
+dependencies = [
+    "fastmcp>=3.0",
+]
+
+[project.optional-dependencies]
+webui = [
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+]
+
+[project.scripts]
+dcc-daemon = "dcc_daemon.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["dcc_daemon"]
+
+[tool.pytest.ini_options]
+# plugins/common holds the vendored (non-package) DCC socket server.
+pythonpath = ["../../plugins/common"]
+testpaths = ["tests"]

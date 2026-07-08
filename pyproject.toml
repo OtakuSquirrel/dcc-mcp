@@ -5,19 +5,14 @@ build-backend = "hatchling.build"
 [project]
 name = "dcc-mcp"
 version = "0.1.0"
-description = "Agent-oriented MCP servers for DCC applications (Blender, Houdini, Unreal Engine)"
+description = "Unified local daemon for agent → DCC control (Blender, Houdini, Unreal Engine)."
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.11"
 dependencies = [
-    "dcc-mcp-core",
-    "blender-mcp",
-    "houdini-mcp",
-    "ue-mcp",
-    "os-mcp",
+    "dcc-daemon",
 ]
 
-# Workspace-level dev dependencies
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
@@ -25,7 +20,7 @@ dev = [
     "ruff>=0.4",
 ]
 webui = [
-    "dcc-mcp-core[webui]",
+    "dcc-daemon[webui]",
 ]
 
 [tool.uv]
@@ -35,8 +30,4 @@ package = false
 members = ["packages/*"]
 
 [tool.uv.sources]
-dcc-mcp-core = { workspace = true }
-blender-mcp = { workspace = true }
-houdini-mcp = { workspace = true }
-ue-mcp = { workspace = true }
-os-mcp = { workspace = true }
+dcc-daemon = { workspace = true }
