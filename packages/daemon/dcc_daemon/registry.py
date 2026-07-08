@@ -81,12 +81,10 @@ class InstanceRegistry:
         return self._probe(port)
 
     def _scan(self) -> list[Instance]:
-        lo, hi = config.port_pool()
-        ports = list(range(lo, hi + 1))
-        # Parallel liveness probe first — a pooled TCP connect_ex across the
-        # whole range serially would take minutes. Then only identify the
-        # few that are actually listening.
-        with ThreadPoolExecutor(max_workers=128) as pool:
+        ports = config.dcc_ports()
+        # Parallel liveness probe first — serial connect_ex across the pool
+        # would be slow. Then only identify the few actually listening.
+        with ThreadPoolExecutor(max_workers=min(128, max(1, len(ports)))) as pool:
             listening = [p for p, alive in
                          zip(ports, pool.map(_port_listening, ports)) if alive]
         if not listening:
@@ -103,12 +101,11 @@ class InstanceRegistry:
         except Exception:
             # Listening but not our protocol, or busy — record as opaque.
             if _port_listening(port):
-                return Instance(port=port, kind=config.kind_for_port(port),
-                                reachable=False)
+                return Instance(port=port, kind=None, reachable=False)
             return None
         return Instance(
             port=port,
-            kind=info.get("kind") or config.kind_for_port(port),
+            kind=info.get("kind"),          # self-reported by the plugin
             version=str(info.get("version", "")),
             pid=info.get("pid"),
             file=str(info.get("file", "")),

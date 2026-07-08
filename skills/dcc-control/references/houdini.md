@@ -3,18 +3,17 @@
 Load this when the target `kind` is `houdini`. You send Python that runs
 inside Houdini with the full `hou` API.
 
-## Execution model (important — differs from Blender/UE)
+## Execution model
 
-- Houdini is reached over **RPyC**, not the socket-server plugin. The
-  daemon teleports a small helper that runs your code inside Houdini and
-  returns the result as JSON.
+- Code runs on Houdini's **main thread** (the daemon plugin marshals it
+  through `hdefereval.executeInMainThreadWithResult`), so `hou` calls are
+  safe and synchronous.
 - **`hou` is in scope automatically.** Import anything else inside the
   code as usual.
 - Return via `result`, JSON-safe only. Convert `hou` objects: a node's
   `.path()`, a vector's `list(...)`, a parm's `.eval()`.
-- Because only JSON crosses the wire (not live netref proxies), you
-  cannot hold a `hou.Node` across calls — re-fetch it by path each time:
-  `hou.node("/obj/geo1")`.
+- Houdini uses the same socket-server plugin and the same JSON protocol
+  as every other DCC — from your side it's identical to Blender.
 
 ## Minimal patterns
 
@@ -74,8 +73,8 @@ result = {
 - **Contexts/categories.** Nodes only create inside a compatible parent
   (SOPs inside a `geo`, DOPs inside a `dopnet`, etc.). Create the
   container first.
-- **No persistent references.** Every call is a fresh teleport; a node
-  handle from a previous call is gone. Always `hou.node("<path>")`.
+- **Each call is independent.** Don't rely on Python variables persisting
+  between `execute_python` calls; re-fetch nodes with `hou.node("<path>")`.
 - **Parms are typed.** `.set()` accepts the matching type; `.eval()`
   returns the evaluated value (channels/expressions resolved).
 
@@ -86,9 +85,10 @@ It needs a running Houdini **GUI** with a Scene Viewer pane — on a
 headless/batch Houdini it will error. For headless verification, read
 geometry stats back via `execute_python` instead.
 
-## Hot-plugging the server (context, not something you do)
+## Starting the plugin (context, not something you do)
 
-Houdini's side is started by a human running
-`import hrpyc; hrpyc.start_server(port=18811)` in Houdini's Python shell
-— no addon install. If `list_instances` doesn't show a Houdini you
-expect, that server may not be started yet.
+Houdini's side is the same socket-server plugin as the other DCCs, wired
+to the main thread via `hdefereval`. A human starts it (from a startup
+script or the Python Shell); it claims a port from the configured pool.
+If `list_instances` doesn't show a Houdini you expect, its plugin may not
+be started yet.

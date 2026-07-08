@@ -1,0 +1,104 @@
+"""Houdini plugin — daemon socket server adapter.
+
+Wires the shared, DCC-agnostic ``DCCServer`` (from
+``plugins/common/dcc_socket_server.py``) to Houdini's main thread.
+
+Houdini used to be driven over RPyC (``hrpyc``); it now uses the same
+embedded socket server as every other DCC, so all four speak one
+protocol on one port pool and the daemon needs no Houdini-special case.
+The only Houdini-specific piece is ``run_on_main``: ``hou`` is not
+thread-safe, so code must run on the main thread — Houdini provides
+``hdefereval.executeInMainThreadWithResult`` for exactly this (the
+equivalent of Maya's utility and Blender's timer bridge).
+
+Install: copy this file + ``dcc_socket_server.py`` somewhere on
+``$HOUDINI_PATH`` and import it from a ``123.py``/``456.py`` startup
+script, or paste into the Python Shell:
+
+    import dcc_daemon_houdini as d; d.start()
+"""
+
+from __future__ import annotations
+
+import base64
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(__file__))
+from dcc_socket_server import DCCServer, default_info  # noqa: E402
+
+import hou  # noqa: E402  — provided by the Houdini Python environment
+
+_server: "DCCServer | None" = None
+
+
+# ── main-thread bridge ──────────────────────────────────────────────
+# Houdini ships a blocking "run this on the main thread and give me the
+# result" primitive — it IS our run_on_main. It blocks the calling
+# (network) thread until the main thread runs the callable at idle.
+def _run_on_main(fn):
+    import hdefereval
+    return hdefereval.executeInMainThreadWithResult(fn)
+
+
+# ── DCC-specific hooks (run on the main thread) ─────────────────────
+
+def _get_info() -> dict:
+    try:
+        version = hou.applicationVersionString()
+    except Exception:  # noqa: BLE001
+        version = ""
+    try:
+        hip = hou.hipFile.path()
+    except Exception:  # noqa: BLE001
+        hip = ""
+    return default_info("houdini", version, hip)
+
+
+def _exec_globals() -> dict:
+    return {"hou": hou}
+
+
+def _screenshot() -> str:
+    path = os.path.join(hou.getenv("HOUDINI_TEMP_DIR") or os.path.expanduser("~"),
+                        "dcc_daemon_hou_shot.png")
+    view = hou.ui.paneTabOfType(hou.paneTabType.SceneViewer)
+    if view is None:
+        raise RuntimeError("no Scene Viewer pane (headless Houdini has no viewport)")
+    settings = view.flipbookSettings()
+    settings.output(path)
+    view.flipbook(view.curViewport(), settings)
+    with open(path, "rb") as f:
+        return base64.b64encode(f.read()).decode("ascii")
+
+
+def start(port: int | None = None) -> int:
+    """Start the socket server. Pin ``port`` if given, else claim the
+    first free port from the configured pool. Returns the claimed port."""
+    global _server
+    if _server is not None:
+        return _server.port
+    _server = DCCServer(
+        kind="houdini",
+        run_on_main=_run_on_main,
+        get_info=_get_info,
+        exec_globals=_exec_globals,
+        screenshot=_screenshot,
+    )
+    if port is not None:
+        _server.start(port)
+    else:
+        _server.claim_and_start()
+    return _server.port
+
+
+def stop() -> None:
+    global _server
+    if _server is not None:
+        _server.stop()
+        _server = None
+
+
+if __name__ == "__main__":
+    env = os.environ.get("DCC_DAEMON_PORT")
+    start(int(env) if env else None)

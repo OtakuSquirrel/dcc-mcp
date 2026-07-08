@@ -1,10 +1,10 @@
-"""Transport pool — routes each port to the right protocol adapter.
+"""Transport pool — one protocol for every DCC.
 
-The daemon owns exactly one :class:`TransportPool`. Callers name a port;
-the pool picks the adapter by the port's conventional DCC range:
-
-  * Houdini range  → :class:`RpycAdapter`      (hot-pluggable ``hrpyc``)
-  * everything else → :class:`JsonSocketAdapter` (vendored socket plugin)
+Every DCC (Blender, Houdini, Unreal, Maya) embeds the same vendored
+socket server (``plugins/common/dcc_socket_server.py``) and speaks the
+same newline-delimited JSON. There is exactly one adapter; the port
+identifies the instance and the plugin self-reports its ``kind`` via
+``get_info`` — the daemon never infers protocol or kind from the port.
 
 Adapters are opened lazily per port, reused, and dropped on error
 (reconnect on next call). A per-port lock serializes concurrent calls to
@@ -20,10 +20,8 @@ import logging
 import threading
 from typing import Any
 
-from dcc_daemon import config
 from dcc_daemon.adapters.base import Adapter, DCCError
 from dcc_daemon.adapters.json_socket import JsonSocketAdapter
-from dcc_daemon.adapters.rpyc_adapter import RpycAdapter
 
 __all__ = ["DCCError", "TransportPool", "adapter_for_port"]
 
@@ -31,9 +29,10 @@ logger = logging.getLogger(__name__)
 
 
 def adapter_for_port(port: int, host: str = "127.0.0.1") -> Adapter:
-    """Construct (not connect) the adapter appropriate for ``port``."""
-    if config.kind_for_port(port) == "houdini":
-        return RpycAdapter(port, host)
+    """Construct (not connect) the adapter for ``port``.
+
+    One protocol for all DCCs, so this is always a JsonSocketAdapter. Kept
+    as a function so a future alternate transport has a single seam."""
     return JsonSocketAdapter(port, host)
 
 
@@ -65,7 +64,7 @@ class TransportPool:
         with lock:
             try:
                 conn = self._get_or_open(port)
-            except (OSError, EOFError):
+            except OSError:
                 return False
             ok = conn.ping()
             if not ok:

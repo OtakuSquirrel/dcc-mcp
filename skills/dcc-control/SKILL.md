@@ -1,6 +1,6 @@
 ---
 name: dcc-control
-description: Control local DCC applications (Blender, Houdini, Unreal Engine) through the dcc-daemon. Use this whenever the task involves creating, editing, inspecting, or rendering in a 3D DCC — modeling, materials, node graphs, animation, lighting, cameras, import/export, screenshots. You drive the DCC by sending Python, not by calling many per-operation tools.
+description: Control local DCC applications (Blender, Houdini, Unreal Engine, Maya) through the dcc-daemon. Use this whenever the task involves creating, editing, inspecting, or rendering in a 3D DCC — modeling, materials, node graphs, animation, lighting, cameras, import/export, screenshots. You drive the DCC by sending Python, not by calling many per-operation tools.
 ---
 
 # Controlling DCCs via the daemon
@@ -27,7 +27,7 @@ and `health` are infrastructure; **everything creative or inspective is
 ## Core loop
 
 1. **Discover** — `list_instances()`; pick the `port` whose `kind`
-   matches the task (`blender` / `houdini` / `ue`).
+   matches the task (`blender` / `houdini` / `ue` / `maya`).
 2. **Act** — `execute_python(port, code)`. Return data by assigning to
    `result`:
    ```python
@@ -45,6 +45,7 @@ and the traps that actually bite:
 - Blender → [references/blender.md](references/blender.md)
 - Houdini → [references/houdini.md](references/houdini.md)
 - Unreal Engine → [references/unreal.md](references/unreal.md)
+- Maya → [references/maya.md](references/maya.md)
 
 For the exact tool semantics — the `execute_python` result contract,
 error shapes, timeouts, multi-instance addressing — see

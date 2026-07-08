@@ -61,6 +61,7 @@ class DCCServer:
         self._server_sock: socket.socket | None = None
         self._running = False
         self._threads: list[threading.Thread] = []
+        self.port: int | None = None
 
     # ── lifecycle ──
 
@@ -68,18 +69,38 @@ class DCCServer:
         if self._running:
             return
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        # NOTE: no SO_REUSEADDR — we WANT bind() to fail on a port another
+        # instance already holds, so claim_and_start can move to the next.
         sock.bind((self.host, port))
         sock.listen(8)
         self._server_sock = sock
         self._running = True
+        self.port = port
         t = threading.Thread(target=self._accept_loop, name="dcc-mcp-accept", daemon=True)
         t.start()
         self._threads.append(t)
         logger.info("[%s] socket server listening on %s:%d", self.kind, self.host, port)
 
+    def claim_and_start(self, ports: list[int] | None = None) -> int:
+        """Scan a pool of ports and bind the first free one.
+
+        This is how a DCC plugin picks its port at launch: read the pool
+        (from ``~/.dcc-mcp/config.toml`` if ``ports`` is None), try each
+        in order, and hold the first that binds. Returns the claimed port;
+        raises RuntimeError if the whole pool is taken.
+        """
+        pool = ports if ports is not None else read_dcc_ports()
+        for port in pool:
+            try:
+                self.start(port)
+                return port
+            except OSError:
+                continue  # taken by another instance; try the next
+        raise RuntimeError(f"[{self.kind}] no free port in pool {pool}")
+
     def stop(self) -> None:
         self._running = False
+        self.port = None
         if self._server_sock is not None:
             try:
                 self._server_sock.close()
@@ -159,3 +180,44 @@ class DCCServer:
 
 def default_info(kind: str, version: str, file: str = "") -> dict:
     return {"kind": kind, "version": version, "pid": os.getpid(), "file": file}
+
+
+# Default pool — must match dcc_daemon.config.DEFAULT_DCC_PORTS.
+_DEFAULT_DCC_PORTS = list(range(18811, 18831))
+
+
+def read_dcc_ports() -> list[int]:
+    """Read the DCC port pool from ``~/.dcc-mcp/config.toml``.
+
+    Pure stdlib (``tomllib``, Python 3.11+, which every current DCC ships)
+    so this file stays vendorable into any DCC. Accepts an explicit
+    ``ports.dcc = [...]`` list or a ``ports.min``/``ports.max`` range.
+    Falls back to the default block if the file is missing/malformed —
+    keeping this in lock-step with dcc_daemon.config.dcc_ports().
+    """
+    import os.path
+
+    path = os.path.expanduser("~/.dcc-mcp/config.toml")
+    if not os.path.exists(path):
+        return list(_DEFAULT_DCC_PORTS)
+    try:
+        import tomllib
+        with open(path, "rb") as f:
+            data = tomllib.load(f)
+    except Exception:  # noqa: BLE001 — any read/parse error → defaults
+        return list(_DEFAULT_DCC_PORTS)
+    p = data.get("ports") or {}
+    raw = p.get("dcc")
+    if isinstance(raw, list) and raw:
+        try:
+            return [int(x) for x in raw]
+        except (TypeError, ValueError):
+            return list(_DEFAULT_DCC_PORTS)
+    if "min" in p and "max" in p:
+        try:
+            lo, hi = int(p["min"]), int(p["max"])
+            if lo <= hi:
+                return list(range(lo, hi + 1))
+        except (TypeError, ValueError):
+            pass
+    return list(_DEFAULT_DCC_PORTS)

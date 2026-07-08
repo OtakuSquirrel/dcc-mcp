@@ -26,12 +26,15 @@ from dcc_daemon.tunnel.client import TunnelClient
 from dcc_daemon.tunnel.relay import Relay
 from dcc_daemon.tunnel.tokens import TokenStore
 
-_DCC_PORT = 19878
+_DCC_PORT = 18815  # within the default pool so discovery scans it
 _DAEMON_ID = "dccbox-test"
 
 
 @pytest.fixture
-def fake_dcc():
+def fake_dcc(monkeypatch):
+    # Pin the scanned pool to this port so list_instances is deterministic
+    # regardless of the machine's ~/.dcc-mcp/config.toml.
+    monkeypatch.setattr("dcc_daemon.registry.config.dcc_ports", lambda: [_DCC_PORT])
     jobs: "queue.Queue[tuple]" = queue.Queue()
     stop = threading.Event()
 

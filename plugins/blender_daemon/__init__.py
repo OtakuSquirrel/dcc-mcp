@@ -34,7 +34,6 @@ import bpy  # noqa: E402
 sys.path.insert(0, os.path.dirname(__file__))
 from dcc_socket_server import DCCServer, default_info  # noqa: E402
 
-_DEFAULT_PORT = 19811
 _server: DCCServer | None = None
 
 # ── main-thread bridge ──────────────────────────────────────────────
@@ -92,10 +91,13 @@ def _screenshot() -> str:
         return base64.b64encode(f.read()).decode("ascii")
 
 
-def start(port: int = _DEFAULT_PORT) -> None:
+def start(port: int | None = None) -> int:
+    """Start the socket server. If ``port`` is given, bind exactly it;
+    otherwise scan the configured pool and claim the first free port.
+    Returns the claimed port."""
     global _server
     if _server is not None:
-        return
+        return _server.port
     _server = DCCServer(
         kind="blender",
         run_on_main=_run_on_main,
@@ -103,9 +105,13 @@ def start(port: int = _DEFAULT_PORT) -> None:
         exec_globals=_exec_globals,
         screenshot=_screenshot,
     )
-    _server.start(port)
+    if port is not None:
+        _server.start(port)
+    else:
+        _server.claim_and_start()
     if not bpy.app.timers.is_registered(_drain_jobs):
         bpy.app.timers.register(_drain_jobs, first_interval=0.02, persistent=True)
+    return _server.port
 
 
 def stop() -> None:
@@ -118,8 +124,9 @@ def stop() -> None:
 
 
 def register() -> None:
-    port = int(os.environ.get("DCC_DAEMON_PORT", _DEFAULT_PORT))
-    start(port)
+    # DCC_DAEMON_PORT pins a specific port; otherwise claim from the pool.
+    env = os.environ.get("DCC_DAEMON_PORT")
+    start(int(env) if env else None)
 
 
 def unregister() -> None:
@@ -127,7 +134,7 @@ def unregister() -> None:
 
 
 if __name__ == "__main__":
-    # Headless launch path: `blender --python __init__.py -- --port 19811`
+    # Headless: `blender --python __init__.py -- [--port 19811]`
     argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
-    port = int(argv[argv.index("--port") + 1]) if "--port" in argv else _DEFAULT_PORT
+    port = int(argv[argv.index("--port") + 1]) if "--port" in argv else None
     start(port)

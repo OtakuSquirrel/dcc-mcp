@@ -3,11 +3,11 @@
 The fake DCC runs the real shared ``DCCServer`` with a queue-based
 main-thread simulation, so these exercise the actual wire protocol,
 transport pool, registry discovery, health, and error propagation —
-everything except a real bpy/hou/unreal runtime.
+everything except a real bpy/hou/unreal/maya runtime.
 
-Parametrized over a Blender-range and a Unreal-range port: both use the
-JSON-socket adapter, so the same suite validates the UE path (which
-shares Blender's vendored socket server and ``JsonSocketAdapter``).
+Parametrized over all four DCC kinds. Every DCC now speaks the same
+JSON socket protocol on one port pool, so the same suite validates all
+of them; ``kind`` is whatever the plugin self-reports via ``get_info``.
 """
 
 from __future__ import annotations
@@ -22,18 +22,25 @@ import pytest
 from dcc_socket_server import DCCServer, default_info
 from dcc_daemon.core import DaemonCore
 
-# (kind, port, version). Port ranges pick the adapter: 19811+ and 20811+
-# both route to JsonSocketAdapter, so this covers Blender and UE.
+# (kind, port, version). All four use the same JSON adapter; ports are
+# within the default pool (18811-18830) so discovery scans them. kind is
+# self-reported by the plugin.
 _CASES = [
-    ("blender", 19877, "4.2.0"),
-    ("ue", 20877, "5.4.0"),
+    ("blender", 18811, "4.2.0"),
+    ("houdini", 18812, "20.5.0"),
+    ("ue", 18813, "5.4.0"),
+    ("maya", 18814, "2025"),
 ]
 
 
 @pytest.fixture(params=_CASES, ids=lambda c: c[0])
-def fake_dcc(request):
-    """Start a fake DCC on a test port; yield (core, port, state, kind, version)."""
+def fake_dcc(request, monkeypatch):
+    """Start a fake DCC on a test port; yield (core, port, state, kind, version).
+
+    Pins the daemon's scanned pool to just this port so discovery is
+    deterministic regardless of the machine's ~/.dcc-mcp/config.toml."""
     kind, port, version = request.param
+    monkeypatch.setattr("dcc_daemon.registry.config.dcc_ports", lambda: [port])
     jobs: "queue.Queue[tuple]" = queue.Queue()
     stop_flag = threading.Event()
 
