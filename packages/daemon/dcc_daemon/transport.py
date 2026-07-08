@@ -1,134 +1,45 @@
-"""Unified TCP+JSON transport to a DCC instance.
+"""Transport pool — routes each port to the right protocol adapter.
 
-Every DCC plugin (Blender, Houdini, UE) runs the same minimal socket
-server that speaks newline-delimited JSON:
+The daemon owns exactly one :class:`TransportPool`. Callers name a port;
+the pool picks the adapter by the port's conventional DCC range:
 
-    request : {"command": "execute_python", "params": {"code": "..."}}\\n
-    reply   : {"result": ...}\\n   or   {"error": "..."}\\n
+  * Houdini range  → :class:`RpycAdapter`      (hot-pluggable ``hrpyc``)
+  * everything else → :class:`JsonSocketAdapter` (vendored socket plugin)
 
-There is only ONE command that matters — ``execute_python`` — plus
-``ping`` and ``get_info`` for liveness/identity. This module knows
-nothing DCC-specific; the port identifies the instance, the plugin on
-the other end runs the code on its own main thread.
+Adapters are opened lazily per port, reused, and dropped on error
+(reconnect on next call). A per-port lock serializes concurrent calls to
+the same instance — a DCC main thread does one thing at a time.
 
-Connections are opened lazily per port, reused, and dropped on error
-(reconnect on next call). Per-port locks serialize concurrent calls to
-the same instance — a DCC main thread can only do one thing at a time.
+``DCCError`` is re-exported here so existing imports
+(``from dcc_daemon.transport import DCCError``) keep working.
 """
 
 from __future__ import annotations
 
-import json
 import logging
-import socket
 import threading
 from typing import Any
 
+from dcc_daemon import config
+from dcc_daemon.adapters.base import Adapter, DCCError
+from dcc_daemon.adapters.json_socket import JsonSocketAdapter
+from dcc_daemon.adapters.rpyc_adapter import RpycAdapter
+
+__all__ = ["DCCError", "TransportPool", "adapter_for_port"]
+
 logger = logging.getLogger(__name__)
 
-_RECV_SIZE = 1024 * 1024
-_CONNECT_TIMEOUT = 10.0
-# execute_python calls can be long (renders, sims). The daemon-level
-# heartbeat/async layer is responsible for not blocking the agent; the
-# socket read itself uses a generous timeout.
-_CALL_TIMEOUT = 600.0
 
-
-class DCCConnection:
-    """A single newline-delimited JSON socket to one DCC on a known port."""
-
-    def __init__(self, port: int, host: str = "127.0.0.1"):
-        self.host = host
-        self.port = port
-        self._socket: socket.socket | None = None
-
-    def connect(self) -> None:
-        self.close()
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(_CONNECT_TIMEOUT)
-        sock.connect((self.host, self.port))
-        sock.settimeout(_CALL_TIMEOUT)
-        self._socket = sock
-
-    def close(self) -> None:
-        if self._socket is not None:
-            try:
-                self._socket.close()
-            except OSError:
-                pass
-            self._socket = None
-
-    def _send(self, command: str, params: dict | None = None) -> Any:
-        if self._socket is None:
-            raise ConnectionError("not connected")
-        request: dict[str, Any] = {"command": command}
-        if params:
-            request["params"] = params
-        payload = (json.dumps(request) + "\n").encode("utf-8")
-        try:
-            self._socket.sendall(payload)
-            line = self._recv_line()
-            response = json.loads(line)
-        except (OSError, json.JSONDecodeError) as e:
-            self.close()
-            raise ConnectionError(f"transport error on port {self.port}: {e}") from e
-        if isinstance(response, dict) and "error" in response:
-            raise DCCError(str(response["error"]), traceback=response.get("traceback"))
-        return response.get("result") if isinstance(response, dict) else response
-
-    def _recv_line(self) -> str:
-        buffer = b""
-        while True:
-            if self._socket is None:
-                raise ConnectionError("connection lost during recv")
-            chunk = self._socket.recv(_RECV_SIZE)
-            if not chunk:
-                raise ConnectionError("connection closed by DCC")
-            buffer += chunk
-            if b"\n" in buffer:
-                line, _ = buffer.split(b"\n", 1)
-                return line.decode("utf-8")
-
-    # ── the three commands every plugin implements ──
-
-    def execute_python(self, code: str) -> Any:
-        return self._send("execute_python", {"code": code})
-
-    def ping(self) -> bool:
-        try:
-            return self._send("ping") is not None
-        except (ConnectionError, DCCError):
-            return False
-
-    def get_info(self) -> dict:
-        result = self._send("get_info")
-        return result if isinstance(result, dict) else {}
-
-    def screenshot(self) -> str:
-        """Return a base64-encoded PNG of the DCC viewport/render."""
-        result = self._send("screenshot")
-        if isinstance(result, dict):
-            result = result.get("png_base64") or result.get("data") or ""
-        return str(result)
-
-
-class DCCError(RuntimeError):
-    """The DCC executed the command but it raised inside the DCC process."""
-
-    def __init__(self, message: str, traceback: str | None = None):
-        super().__init__(message)
-        self.traceback = traceback
+def adapter_for_port(port: int, host: str = "127.0.0.1") -> Adapter:
+    """Construct (not connect) the adapter appropriate for ``port``."""
+    if config.kind_for_port(port) == "houdini":
+        return RpycAdapter(port, host)
+    return JsonSocketAdapter(port, host)
 
 
 class TransportPool:
-    """Lazy, port-keyed connection cache with per-port locks.
-
-    No 'active port'. Every call names a port. The daemon owns exactly
-    one of these for the whole process.
-    """
-
     def __init__(self):
-        self._conns: dict[int, DCCConnection] = {}
+        self._conns: dict[int, Adapter] = {}
         self._locks: dict[int, threading.Lock] = {}
         self._registry_lock = threading.Lock()
 
@@ -154,7 +65,7 @@ class TransportPool:
         with lock:
             try:
                 conn = self._get_or_open(port)
-            except OSError:
+            except (OSError, EOFError):
                 return False
             ok = conn.ping()
             if not ok:
@@ -173,10 +84,10 @@ class TransportPool:
             conn = self._get_or_open(port)
             return conn.screenshot()
 
-    def _get_or_open(self, port: int) -> DCCConnection:
+    def _get_or_open(self, port: int) -> Adapter:
         conn = self._conns.get(port)
         if conn is None:
-            conn = DCCConnection(port)
+            conn = adapter_for_port(port)
             conn.connect()
             self._conns[port] = conn
         return conn
