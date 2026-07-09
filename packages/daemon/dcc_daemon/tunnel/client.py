@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import ssl
 import traceback
 
 import websockets
@@ -29,11 +30,23 @@ _BACKOFF_MAX = 30.0
 
 class TunnelClient:
     def __init__(self, relay_url: str, daemon_id: str, pair_token: str,
-                 core: DaemonCore | None = None):
+                 core: DaemonCore | None = None, insecure_tls: bool = False):
+        """
+        Args:
+            insecure_tls: for wss:// URLs, skip certificate verification.
+                Needed when the relay uses a self-signed cert bound to a
+                bare IP (no domain, so no CA-issued cert is possible) —
+                e.g. behind a corporate network whose gateway intercepts
+                plaintext ws:// on non-standard ports. TLS still encrypts
+                the traffic (defeats protocol-level inspection); it just
+                isn't validated against a CA. Prefer a real cert + domain
+                when available.
+        """
         self._url = relay_url
         self._daemon_id = daemon_id
         self._token = pair_token
         self._core = core or DaemonCore()
+        self._insecure_tls = insecure_tls
 
     async def run_forever(self) -> None:
         """Connect, serve, and reconnect with backoff until cancelled."""
@@ -50,7 +63,12 @@ class TunnelClient:
             backoff = min(backoff * 2, _BACKOFF_MAX)
 
     async def _session(self) -> None:
-        async with websockets.connect(self._url) as ws:
+        ssl_ctx = None
+        if self._url.startswith("wss://") and self._insecure_tls:
+            ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+            ssl_ctx.check_hostname = False
+            ssl_ctx.verify_mode = ssl.CERT_NONE
+        async with websockets.connect(self._url, ssl=ssl_ctx) as ws:
             await ws.send(p.encode(p.make_hello(p.ROLE_DAEMON, self._daemon_id, self._token)))
             ack = p.decode(await ws.recv())
             if not ack.get("ok"):

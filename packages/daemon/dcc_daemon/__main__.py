@@ -20,7 +20,8 @@ import threading
 from dcc_daemon import config
 
 
-def _start_tunnel(relay_url: str, daemon_id: str, pair_token: str) -> None:
+def _start_tunnel(relay_url: str, daemon_id: str, pair_token: str,
+                  insecure_tls: bool = False) -> None:
     """Run the outbound tunnel client in a background thread + loop.
 
     Uses the SAME DaemonCore (and thus the same registration hub) as the
@@ -29,12 +30,14 @@ def _start_tunnel(relay_url: str, daemon_id: str, pair_token: str) -> None:
     from dcc_daemon.tunnel.client import TunnelClient
 
     def _run():
-        client = TunnelClient(relay_url, daemon_id, pair_token, core=core)
+        client = TunnelClient(relay_url, daemon_id, pair_token, core=core,
+                              insecure_tls=insecure_tls)
         asyncio.run(client.run_forever())
 
     threading.Thread(target=_run, name="dcc-tunnel", daemon=True).start()
     logging.getLogger(__name__).info(
-        "dcc-daemon: tunnel dialing %s as %s", relay_url, daemon_id)
+        "dcc-daemon: tunnel dialing %s as %s%s", relay_url, daemon_id,
+        " (TLS cert verification DISABLED)" if insecure_tls else "")
 
 
 def main() -> None:
@@ -56,6 +59,12 @@ def main() -> None:
                         help="This daemon's id registered at the relay")
     parser.add_argument("--pair-token", default=os.environ.get("DCC_PAIR_TOKEN"),
                         help="Secret proving this daemon's identity to the relay")
+    parser.add_argument("--insecure-tls", action="store_true",
+                        default=bool(os.environ.get("DCC_RELAY_INSECURE_TLS")),
+                        help="Skip certificate verification for a wss:// relay-url "
+                             "(needed for a self-signed cert on a bare IP, e.g. no "
+                             "domain available). Traffic is still encrypted; the cert "
+                             "just isn't CA-validated. Prefer a real cert when possible.")
     parser.add_argument("--log-level", default="INFO")
     args = parser.parse_args()
 
@@ -66,7 +75,8 @@ def main() -> None:
     if args.relay_url:
         if not (args.daemon_id and args.pair_token):
             parser.error("--relay-url requires --daemon-id and --pair-token")
-        _start_tunnel(args.relay_url, args.daemon_id, args.pair_token)
+        _start_tunnel(args.relay_url, args.daemon_id, args.pair_token,
+                     insecure_tls=args.insecure_tls)
 
     # Import late so --help stays fast and import errors surface clearly.
     import uvicorn
