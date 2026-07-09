@@ -85,18 +85,86 @@ identical. (Houdini previously used RPyC/`hrpyc`; it was unified onto the
 same connector so all four share one protocol and the daemon needs no
 per-DCC special case.)
 
-## Quick start
+## Quick start (local)
+
+The full local loop: **run the daemon → point an agent at it → give a
+DCC its plugin → drive it.** Verified end-to-end with Blender.
+
+### 1. Install
 
 ```bash
-uv sync --extra dev          # create .venv, install the daemon
-uv run dcc-daemon            # serve MCP-over-HTTP on 127.0.0.1:8765/mcp
+uv sync --extra dev          # create .venv, install the daemon + dcc-relay CLIs
 ```
 
-Point a local agent at it:
+### 2. Run the daemon (keep it running)
+
+The daemon is a resident "guardian" — start it once and leave it up; it
+is independent of any agent.
+
+```bash
+uv run dcc-daemon            # serves MCP on 127.0.0.1:8765, register hub on :8766
+```
+
+On Windows, double-click **`start-daemon.bat`** instead — it opens a
+console window that streams logs live; close the window to stop the
+daemon.
+
+**Is it running?** Open <http://127.0.0.1:8765/> (the dashboard) in a
+browser — reachable = running, and it lists the registered DCCs. Or check
+the port: `Get-NetTCPConnection -LocalPort 8765` (Windows) /
+`lsof -i:8765` (macOS/Linux).
+
+### 3. Point your agent at it
+
+A project-scoped `.mcp.json` (already in this repo) registers the daemon
+as an MCP server over HTTP:
 
 ```json
 { "mcpServers": { "dcc": { "type": "http", "url": "http://127.0.0.1:8765/mcp" } } }
 ```
+
+MCP servers load at agent **startup**, and only if the endpoint is
+reachable — so start the daemon *first*, then (re)start your agent
+(e.g. Claude Code). The `dcc` tools (`list_instances`, `execute_python`,
+`screenshot`, `health`) then appear.
+
+### 4. Install a DCC plugin
+
+Each DCC needs the small connector that dials the daemon. Assemble a
+folder with **both** the per-DCC file and the shared connector next to
+each other, then load it. Blender example:
+
+```bash
+# stage the addon (both files must sit together)
+mkdir -p dcc_daemon_blender
+cp plugins/blender_daemon/__init__.py     dcc_daemon_blender/
+cp plugins/common/dcc_socket_server.py    dcc_daemon_blender/
+```
+
+Then either install it as an addon (Preferences → Add-ons → “DCC Daemon
+Bridge”), or launch Blender with it directly:
+
+```bash
+blender --python dcc_daemon_blender/__init__.py
+```
+
+On launch it dials the daemon and registers. Full per-DCC steps (Houdini,
+Unreal, Maya) are in [docs/plugin-install.md](docs/plugin-install.md).
+
+### 5. Drive it
+
+Ask the agent something like *"list the DCCs, then add a sphere in
+Blender."* Under the hood:
+
+```
+list_instances()                    -> [{"instance_id": "blender-1", ...}]
+execute_python("blender-1", "bpy.ops.mesh.primitive_uv_sphere_add()")
+screenshot("blender-1")             -> the viewport image
+```
+
+There are no per-operation tools — the agent writes `bpy`/`hou`/`unreal`/
+`cmds` and sends it through `execute_python`; the `dcc-control` skill
+(under `skills/`) teaches the recipes.
 
 ## Configuration
 
