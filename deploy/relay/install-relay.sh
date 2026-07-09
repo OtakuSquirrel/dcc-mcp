@@ -20,7 +20,7 @@ set -euo pipefail
 REPO_URL="${DCC_RELAY_REPO:-https://github.com/OtakuSquirrel/dcc-mcp.git}"
 REPO_REF="${DCC_RELAY_REF:-daemon-rearch}"
 PREFIX="${DCC_RELAY_PREFIX:-/opt/dcc-relay}"
-PORT="${DCC_RELAY_PORT:-8787}"
+PORT="${DCC_RELAY_PORT:-12099}"
 BIND="${DCC_RELAY_BIND:-0.0.0.0}"          # 127.0.0.1 if fronting with Caddy
 DOMAIN="${DCC_RELAY_DOMAIN:-}"             # set to enable Caddy TLS
 SERVICE_USER="${DCC_RELAY_USER:-dccrelay}"

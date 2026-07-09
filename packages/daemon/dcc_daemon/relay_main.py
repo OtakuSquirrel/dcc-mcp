@@ -4,7 +4,7 @@ Deploy on a host with a public address (put a TLS-terminating proxy in
 front, or point --certfile/--keyfile at real certs). The relay itself
 executes nothing; it only pairs authenticated daemons and agents.
 
-    dcc-relay serve --tokens tokens.json --port 8787
+    dcc-relay serve --tokens tokens.json --port 12099
     dcc-relay add-daemon --tokens tokens.json            # -> daemon_id + pair_token
     dcc-relay add-agent  --tokens tokens.json --daemon-id dccbox-...  # -> access_token
 """
@@ -28,7 +28,7 @@ def main() -> None:
     ps = sub.add_parser("serve", help="run the relay server")
     ps.add_argument("--tokens", type=Path, required=True, help="token store JSON path")
     ps.add_argument("--host", default="0.0.0.0")
-    ps.add_argument("--port", type=int, default=8787)
+    ps.add_argument("--port", type=int, default=12099)
     ps.add_argument("--certfile", help="TLS cert (enables wss:// directly)")
     ps.add_argument("--keyfile", help="TLS key")
     ps.add_argument("--log-level", default="INFO")

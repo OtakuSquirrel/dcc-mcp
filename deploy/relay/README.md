@@ -15,7 +15,7 @@ the "drive my home DCC from the cloud" case.
 
 - A server with a **public IP or domain** (a $5 VPS is plenty — 1 vCPU /
   512 MB).
-- One inbound port open (default **8787**). This is safe to expose: the
+- One inbound port open (default **12099**). This is safe to expose: the
   relay runs no code.
 - **Python 3.11+** (the installer checks).
 - For production: a **domain name** so the installer can set up TLS
@@ -30,7 +30,7 @@ On the server, as root:
 git clone -b daemon-rearch https://github.com/OtakuSquirrel/dcc-mcp.git
 cd dcc-mcp/deploy/relay
 
-# Quick test (plaintext ws://<ip>:8787):
+# Quick test (plaintext ws://<ip>:12099):
 sudo ./install-relay.sh
 
 # Production (auto HTTPS via Caddy for your domain):
@@ -52,7 +52,7 @@ Re-run it any time to update the code and restart the service.
 | Var | Default | Meaning |
 |-----|---------|---------|
 | `DCC_RELAY_DOMAIN` | — | Domain for Caddy TLS. Set it → `wss://`, unset → `ws://`. |
-| `DCC_RELAY_PORT` | `8787` | Relay listen port. |
+| `DCC_RELAY_PORT` | `12099` | Relay listen port. |
 | `DCC_RELAY_REF` | `daemon-rearch` | Git branch/tag to deploy. |
 | `DCC_RELAY_PREFIX` | `/opt/dcc-relay` | Install dir. |
 

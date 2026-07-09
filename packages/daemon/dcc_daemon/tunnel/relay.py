@@ -170,7 +170,7 @@ class Relay:
             pass
 
 
-async def serve(tokens: TokenStore, host: str = "0.0.0.0", port: int = 8787,
+async def serve(tokens: TokenStore, host: str = "0.0.0.0", port: int = 12099,
                 ssl=None) -> None:
     """Run the relay until cancelled."""
     relay = Relay(tokens)
