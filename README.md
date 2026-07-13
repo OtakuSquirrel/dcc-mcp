@@ -225,22 +225,38 @@ real protocol**, exercising the daemon's actual code paths:
 - `tests/test_webui.py` — the dashboard + JSON APIs via Starlette's
   TestClient.
 ```bash
-uv run pytest packages/daemon/tests/   # 37 tests
+uv run pytest packages/daemon/tests/   # 52 tests
 uv run ruff check packages/ plugins/
 ```
 
 What this does **not** cover — real bpy/hou/unreal/cmds API calls,
-main-thread timing inside a live DCC, and actual viewport capture — is
+main-thread timing inside a live DCC, and every desktop/window arrangement — is
 verified manually against running DCCs.
+
+### Windows portable build
+
+A self-contained Windows x64 build includes the Python runtime, daemon,
+WebUI, screenshot dependencies, and all four managed DCC plugin payloads:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/build-portable.ps1
+```
+
+The build runs the frozen executable on isolated ports, performs a real MCP
+`initialize` and `tools/list`, validates bundled plugin files, and creates
+`artifacts/DCC-MCP-Portable-x64.zip`. See
+[docs/windows-packaging.md](docs/windows-packaging.md).
 
 ## Status
 
 - **Done:** guardian daemon; registration model (DCCs dial in, live
   registry, free death detection); one JSON protocol across Blender,
   Houdini, Unreal, Maya; main-thread-heartbeat health; MCP-over-HTTP
-  ingress; monitoring WebUI; tests.
-- **Next:** one-click install + autostart; plugin-install UI in the WebUI;
-  real-DCC integration coverage; protocol and reconnect hardening.
+  ingress; Windows window capture; monitoring/install WebUI; managed DCC
+  installers; Windows portable build; tests.
+- **Next:** tray launcher + login autostart; Agent MCP/Skill installer;
+  signed Inno Setup package; clean-machine integration coverage; protocol
+  and reconnect hardening.
 
 ## License
 

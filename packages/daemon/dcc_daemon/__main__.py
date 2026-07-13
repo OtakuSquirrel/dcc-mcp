@@ -19,12 +19,15 @@ def main() -> None:
         description="dcc-daemon — unified local entry point for agent → DCC control",
     )
     default_host, default_port = config.http_bind()
+    default_register_host, default_register_port = config.register_bind()
     parser.add_argument("--host", default=default_host,
                         help=f"HTTP bind host (default {default_host})")
     parser.add_argument("--port", type=int, default=default_port,
                         help=f"HTTP bind port (default {default_port})")
     parser.add_argument("--path", default="/mcp",
                         help="MCP HTTP path (default /mcp)")
+    parser.add_argument("--register-port", type=int, default=default_register_port,
+                        help=f"DCC registration port (default {default_register_port})")
     parser.add_argument("--no-webui", action="store_true",
                         help="Serve MCP only; disable the monitoring dashboard")
     parser.add_argument("--log-level", default="INFO")
@@ -38,7 +41,11 @@ def main() -> None:
 
     from dcc_daemon.app import build_app
 
-    app = build_app(mcp_path=args.path, webui=not args.no_webui)
+    app = build_app(
+        mcp_path=args.path,
+        webui=not args.no_webui,
+        registration_bind=(default_register_host, args.register_port),
+    )
 
     log.info("dcc-daemon: MCP at http://%s:%d%s", args.host, args.port, args.path)
     if not args.no_webui:
