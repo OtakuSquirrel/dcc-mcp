@@ -47,6 +47,7 @@ class Target:
     label: str
     install_root: str
     detected_from: str
+    scope: str = "version"
 
 
 @dataclass(frozen=True)
@@ -82,6 +83,7 @@ class BaseInstaller:
     title = ""
     strategy = ""
     note = ""
+    accepts_project_path = False
 
     def __init__(self, home: Path, repo_root: Path) -> None:
         self.home = home.resolve()
@@ -123,8 +125,15 @@ class BaseInstaller:
             "sha256": hashlib.sha256(data).hexdigest(),
         }
 
-    def _write_files(self, files: dict[Path, bytes], target: Target) -> dict[str, Any]:
+    def _write_files(
+        self,
+        files: dict[Path, bytes],
+        target: Target,
+        *,
+        before_overrides: dict[Path, dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
         records = []
+        before_overrides = before_overrides or {}
         manifest_path = self.manifest_path(target)
         previous: dict[str, dict[str, Any]] = {}
         if manifest_path.is_file():
@@ -136,7 +145,9 @@ class BaseInstaller:
         try:
             for path, data in files.items():
                 old_record = previous.get(str(path))
-                before = old_record["before"] if old_record else self._snapshot(path)
+                before = before_overrides.get(path)
+                if before is None:
+                    before = old_record["before"] if old_record else self._snapshot(path)
                 atomic_write(path, data)
                 records.append({
                     "path": str(path),

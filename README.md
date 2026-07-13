@@ -131,12 +131,15 @@ reachable — so start the daemon *first*, then (re)start your agent
 ### 4. Install a DCC plugin
 
 Open the WebUI **Install** tab and click **Scan this computer**. Blender,
-Houdini, and Maya support preview-and-confirm installation, verification, and
-manifest-based uninstall. Blender still needs its installed add-on enabled in
-Preferences; Houdini and Maya start automatically after restart.
+Houdini, Maya, and Unreal Engine support preview-and-confirm installation,
+verification, and manifest-based uninstall. Blender still needs its installed
+add-on enabled in Preferences; Houdini and Maya start automatically after
+restart.
 
-Unreal Engine is the next automatic installer. Until then, its manual flow and
-the Blender development-checkout flow remain available. Blender example:
+Unreal Engine offers a current-user startup shared by installed UE versions and
+a project-scoped plugin for a selected `.uproject`. UE's Python Editor Script
+Plugin must be enabled for each project. The Blender development-checkout flow
+also remains available. Blender example:
 
 Assemble a folder with **both** the per-DCC file and the shared connector:
 

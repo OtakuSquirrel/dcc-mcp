@@ -32,6 +32,8 @@ def test_dashboard_html():
         assert "Uninstall" in r.text
         assert "target-path" in r.text
         assert "installer-note" in r.text
+        assert "Add project" in r.text
+        assert "/api/installers/ue/projects" in r.text
 
 
 def test_api_instances_is_list():
@@ -96,6 +98,13 @@ def test_api_installer_plan_rejects_cross_origin():
             json={"target_id": "maya-2026"},
         )
         assert r.status_code == 403
+
+
+def test_api_unreal_project_rejects_missing_path():
+    with _client() as client:
+        r = client.post("/api/installers/ue/projects", json={"path": "Z:/missing/project.uproject"})
+        assert r.status_code == 400
+        assert ".uproject file does not exist" in r.json()["error"]
 
 
 def test_api_diagnostics():

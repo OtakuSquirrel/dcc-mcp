@@ -5,9 +5,9 @@ operating system and local DCC preference directories, previews exact file
 changes, and requires explicit confirmation before writing. Installations are
 recorded under `~/.dcc-mcp/installations/` for verification and safe uninstall.
 
-Blender, Houdini, and Maya installation files are automated. Blender requires
-one final enable action in Preferences. Unreal Engine remains a manual fallback
-until its engine/project scope installer is completed.
+All four DCC installation flows are automated. Blender requires one final
+enable action in Preferences. Unreal Engine supports both a current-user Python
+startup and a plugin installed into a selected project.
 
 Every DCC embeds the **same** small connector
 (`plugins/common/dcc_socket_server.py`). On launch it **dials the daemon**
@@ -108,6 +108,33 @@ import dcc_daemon_houdini as d; d.start()
 ---
 
 ## Unreal Engine
+
+### Recommended — WebUI current-user startup
+
+Scan and install `UE <version> · Current user`. This writes the managed adapter
+under `~/Documents/UnrealEngine/Python`, an official Unreal Python search path,
+and safely adds a marked block to `init_unreal.py`. It applies to installed UE
+Editor versions for the current OS user without modifying Program Files.
+
+Unreal requires **Python Editor Script Plugin** to be enabled separately in
+each project. Enable it under Edit > Plugins > Scripting and restart the Editor.
+
+### Project-scoped plugin
+
+Paste a `.uproject` path (or its containing directory) into the UE card and
+select **Add project**. The installer previews and writes:
+
+```text
+<Project>/Plugins/DCCDaemon/
+  DCCDaemon.uplugin
+  Content/Python/init_unreal.py
+  Content/Python/dcc_daemon_ue/
+```
+
+The descriptor declares the PythonScriptPlugin dependency and affects only
+that project. Managed projects remain visible after the daemon restarts.
+
+### Manual alternatives
 
 Wires the shared server to the game thread via a Slate post-tick
 callback. Requires the **Python Editor Script Plugin** (Edit > Plugins →

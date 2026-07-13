@@ -83,6 +83,8 @@ _PAGE = """<!doctype html>
   .preview-table th:first-child { width:80px; }
   .preview-table th:last-child { width:180px; }
   .preview-table code { white-space:normal; overflow-wrap:anywhere; word-break:break-word; }
+  .project-picker { display:flex; gap:8px; align-items:center; margin:12px 0; }
+  .project-picker input { flex:1; min-width:0; }
   @media (max-width:720px) { .shell { grid-template-columns:1fr; } nav { border-right:0; border-bottom:1px solid var(--line); display:flex; overflow:auto; } nav button { width:auto; white-space:nowrap; } main { padding:16px; } }
 </style>
 </head>
@@ -225,9 +227,27 @@ async function scanInstallers(){
           `<button class="danger" disabled title="No managed installation">Uninstall</button>`)+
         `<button onclick="verifyInstall('${esc(item.kind)}','${esc(target.id)}')">Verify</button></div></div>`;
     }).join('') : `<p class="empty">${item.available?'No installation detected.':'Automatic installer is not implemented yet.'}</p>`;
+    const projectPicker=item.accepts_project_path?`<div class="project-picker">
+      <input id="ue-project-path" placeholder="C:/path/to/Project.uproject" aria-label="Unreal project path">
+      <button onclick="addUnrealProject()">Add project</button></div><p class="sub" id="ue-project-status">Project scope installs only into that project's Plugins folder.</p>`:'';
     return `<div class="card installer-card"><h3><span class="kind" style="background:${KIND_COLOR[item.kind]||'#556'}">${esc(item.title||item.kind)}</span></h3>
-      <p class="muted">${esc(item.strategy)}</p>${item.note?`<p class="installer-note">${esc(item.note)}</p>`:''}${targetRows}</div>`;
+      <p class="muted">${esc(item.strategy)}</p>${item.note?`<p class="installer-note">${esc(item.note)}</p>`:''}${projectPicker}${targetRows}</div>`;
   }).join('');
+}
+
+async function addUnrealProject(){
+  const input=document.getElementById('ue-project-path');
+  const status=document.getElementById('ue-project-status');
+  const path=input.value.trim();
+  if(!path){status.textContent='Enter a .uproject file or project directory.';return;}
+  try {
+    await jsonFetch('/api/installers/ue/projects', {
+      method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path})
+    });
+    await scanInstallers();
+  } catch(error) {
+    status.textContent=error.message;
+  }
 }
 
 async function previewInstall(kind,targetId,action){
@@ -400,6 +420,16 @@ async def _api_installer_verify(request: Request) -> JSONResponse:
         return _installer_error(InstallerError(str(exc)))
 
 
+async def _api_unreal_project(request: Request) -> JSONResponse:
+    if not _local_origin(request):
+        return JSONResponse({"error": "cross-origin installer requests are forbidden"}, status_code=403)
+    try:
+        body = await _json_body(request)
+        return JSONResponse(installer_service.add_unreal_project(str(body.get("path", ""))))
+    except (InstallerError, OSError) as exc:
+        return _installer_error(InstallerError(str(exc)))
+
+
 async def _api_diagnostics(_request: Request) -> JSONResponse:
     return JSONResponse(diagnostics_snapshot(core.list_instances()))
 
@@ -415,4 +445,5 @@ def register_webui() -> None:
     mcp.custom_route("/api/installers/{kind}/plan", methods=["POST"])(_api_installer_plan)
     mcp.custom_route("/api/installers/{kind}/apply", methods=["POST"])(_api_installer_apply)
     mcp.custom_route("/api/installers/{kind}/verify", methods=["POST"])(_api_installer_verify)
+    mcp.custom_route("/api/installers/ue/projects", methods=["POST"])(_api_unreal_project)
     mcp.custom_route("/api/diagnostics", methods=["GET"])(_api_diagnostics)

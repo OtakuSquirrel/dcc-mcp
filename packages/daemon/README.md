@@ -53,8 +53,9 @@ default. Both listen addresses can be configured in
 The dashboard includes four read-only/local-operations areas: registered
 instances, a bounded in-memory log viewer, a preview-and-confirm DCC installer,
 and daemon/configuration diagnostics. The installer currently supports a
-Blender user add-on, Houdini Packages, and Maya Modules; it records a manifest
-for verification and safe uninstall, and never writes during scanning. Data refreshes on initial
+Blender user add-on, Houdini Packages, Maya Modules, and Unreal current-user or
+project-scoped Python plugins; it records a manifest for verification and safe
+uninstall, and never writes during scanning. Data refreshes on initial
 load or explicit user action; there is no periodic polling.
 
 ## Registration protocol

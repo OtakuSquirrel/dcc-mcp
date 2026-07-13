@@ -20,6 +20,7 @@ from dcc_daemon.installers.base import (
 from dcc_daemon.installers.blender import BlenderInstaller
 from dcc_daemon.installers.houdini import HoudiniInstaller
 from dcc_daemon.installers.maya import MayaInstaller
+from dcc_daemon.installers.unreal import UnrealInstaller
 
 
 class InstallerService:
@@ -34,6 +35,7 @@ class InstallerService:
             "blender": BlenderInstaller(home, repo_root),
             "houdini": HoudiniInstaller(home, repo_root),
             "maya": MayaInstaller(home, repo_root),
+            "ue": UnrealInstaller(home, repo_root),
         }
         self._plans: dict[str, InstallPlan] = {}
         self._lock = threading.Lock()
@@ -69,6 +71,7 @@ class InstallerService:
                 "available": True,
                 "strategy": installer.strategy,
                 "note": installer.note,
+                "accepts_project_path": installer.accepts_project_path,
                 "targets": target_rows,
             })
         return {
@@ -146,6 +149,12 @@ class InstallerService:
         result = installer.verify(target)
         result.update({"kind": kind, "target_id": target_id})
         return result
+
+    def add_unreal_project(self, path: str) -> dict:
+        installer = self.installers.get("ue")
+        if not isinstance(installer, UnrealInstaller):
+            raise InstallerError("Unreal project installation is unavailable")
+        return asdict(installer.add_project(path))
 
     def _discard_expired(self, now: float) -> None:
         expired = [plan_id for plan_id, plan in self._plans.items() if plan.expires_at < now]

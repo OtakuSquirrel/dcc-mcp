@@ -26,6 +26,7 @@ packages = ["dcc_daemon"]
 "../../plugins/blender_daemon/__init__.py" = "dcc_daemon/installers/payloads/blender_daemon/__init__.py"
 "../../plugins/houdini_daemon/__init__.py" = "dcc_daemon/installers/payloads/houdini_daemon/__init__.py"
 "../../plugins/maya_daemon/__init__.py" = "dcc_daemon/installers/payloads/maya_daemon/__init__.py"
+"../../plugins/ue_daemon/__init__.py" = "dcc_daemon/installers/payloads/ue_daemon/__init__.py"
 
 [tool.pytest.ini_options]
 # plugins/common holds the vendored (non-package) DCC socket server.
