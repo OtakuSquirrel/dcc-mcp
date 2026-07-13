@@ -62,7 +62,7 @@ resident process.
 
 Every DCC embeds the same minimal connector
 (`plugins/common/dcc_socket_server.py`) and speaks newline-delimited
-JSON. On launch it **dials the daemon's register port** (default 8766),
+JSON. On launch it **dials the daemon's register port** (default 18813),
 sends its identity, and holds the connection; the daemon assigns an
 `instance_id` and pushes requests down it. No listening port per DCC, no
 scanning — the plugin self-reports its `kind`, and a dropped socket means
@@ -100,17 +100,19 @@ The daemon is a resident "guardian" — start it once and leave it up; it
 is independent of any agent.
 
 ```bash
-uv run dcc-daemon            # serves MCP on 127.0.0.1:8765, register hub on :8766
+uv run dcc-daemon            # serves MCP on 127.0.0.1:18812, register hub on :18813
 ```
 
 On Windows, double-click **`start-daemon.bat`** instead — it opens a
 console window that streams logs live; close the window to stop the
 daemon.
 
-**Is it running?** Open <http://127.0.0.1:8765/> (the dashboard) in a
-browser — reachable = running, and it lists the registered DCCs. Or check
-the port: `Get-NetTCPConnection -LocalPort 8765` (Windows) /
-`lsof -i:8765` (macOS/Linux).
+**Is it running?** Open <http://127.0.0.1:18812/> in a browser. The local
+WebUI provides instance monitoring, a bounded daemon log viewer, downloadable
+plugin packages with installation instructions, and read-only diagnostics.
+It uses initial/manual refresh rather than periodic polling. Or check the
+port: `Get-NetTCPConnection -LocalPort 18812` (Windows) /
+`lsof -i:18812` (macOS/Linux).
 
 ### 3. Point your agent at it
 
@@ -118,7 +120,7 @@ A project-scoped `.mcp.json` (already in this repo) registers the daemon
 as an MCP server over HTTP:
 
 ```json
-{ "mcpServers": { "dcc": { "type": "http", "url": "http://127.0.0.1:8765/mcp" } } }
+{ "mcpServers": { "dcc": { "type": "http", "url": "http://127.0.0.1:18812/mcp" } } }
 ```
 
 MCP servers load at agent **startup**, and only if the endpoint is
@@ -173,8 +175,8 @@ two ports the daemon listens on:
 ```toml
 [daemon]
 host = "127.0.0.1"
-port = 8765               # MCP-over-HTTP for agents
-dcc_register_port = 8766  # DCCs dial here to register
+port = 18812               # MCP-over-HTTP for agents
+dcc_register_port = 18813  # DCCs dial here to register
 ```
 
 Missing/malformed file → built-in defaults, so a fresh machine just works.
@@ -189,7 +191,7 @@ packages/daemon/            the daemon (guardian)
     config.py               reads ~/.dcc-mcp/config.toml (the two listen ports)
     health.py               liveness + main-thread heartbeat; never hangs
     mcp_server.py           the 4 meta-tools over MCP/HTTP
-    webui/                  monitoring dashboard (mounted on the MCP app)
+    webui/                  overview, logs, plugin install, and diagnostics UI
     app.py                  builds the ASGI app (MCP + WebUI); starts the hub
     __main__.py             `dcc-daemon` entry point
   tests/                    tests against real protocol stand-ins

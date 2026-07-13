@@ -36,19 +36,24 @@ registration table is already live.
 ## Run
 
 ```bash
-dcc-daemon                       # MCP: 127.0.0.1:8765/mcp, dashboard: /
+dcc-daemon                       # MCP: 127.0.0.1:18812/mcp, dashboard: /
 dcc-daemon --port 9000 --path /mcp
 ```
 
 Point a local MCP client at it:
 
 ```json
-{ "mcpServers": { "dcc": { "type": "http", "url": "http://127.0.0.1:8765/mcp" } } }
+{ "mcpServers": { "dcc": { "type": "http", "url": "http://127.0.0.1:18812/mcp" } } }
 ```
 
-The daemon also listens for DCC registrations on `127.0.0.1:8766` by
+The daemon also listens for DCC registrations on `127.0.0.1:18813` by
 default. Both listen addresses can be configured in
 `~/.dcc-mcp/config.toml`.
+
+The dashboard includes four read-only/local-operations areas: registered
+instances, a bounded in-memory log viewer, DCC installation guides with
+generated plugin ZIPs, and daemon/configuration diagnostics. Data refreshes
+on initial load or explicit user action; there is no periodic polling.
 
 ## Registration protocol
 

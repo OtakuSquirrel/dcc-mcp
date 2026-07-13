@@ -7,7 +7,7 @@
 
 Every DCC embeds the **same** small connector
 (`plugins/common/dcc_socket_server.py`). On launch it **dials the daemon**
-(the daemon's `dcc_register_port`, default 8766), registers its identity,
+(the daemon's `dcc_register_port`, default 18813), registers its identity,
 and holds the connection; the daemon assigns an `instance_id` and pushes
 requests down it. There is no listening port per DCC and no scanning. All
 DCCs are equal — the connector self-reports its kind.
@@ -17,7 +17,7 @@ The register port comes from `~/.dcc-mcp/config.toml`:
 
 ```toml
 [daemon]
-dcc_register_port = 8766
+dcc_register_port = 18813
 ```
 
 Plugin files:
@@ -53,7 +53,7 @@ Wires the shared server to Blender's main thread via `bpy.app.timers`.
 
 ```bash
 blender --python plugins/blender_daemon/__init__.py                         # register with daemon
-blender --python plugins/blender_daemon/__init__.py -- --register-port 8766  # override port
+blender --python plugins/blender_daemon/__init__.py -- --register-port 18813  # override port
 ```
 
 ---

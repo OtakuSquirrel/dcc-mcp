@@ -5,8 +5,8 @@ to configure. The knobs are the two ports the daemon listens on:
 
     [daemon]
     host = "127.0.0.1"
-    port = 8765              # MCP-over-HTTP for agents
-    dcc_register_port = 8766 # DCCs dial here to register
+    port = 18812              # MCP-over-HTTP for agents
+    dcc_register_port = 18813 # DCCs dial here to register
 
 Falls back to hard defaults if the file is missing or malformed, so a
 fresh machine behaves identically to a configured one.
@@ -21,8 +21,8 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 DEFAULT_HTTP_HOST = "127.0.0.1"
-DEFAULT_HTTP_PORT = 8765
-DEFAULT_REGISTER_PORT = 8766
+DEFAULT_HTTP_PORT = 18812
+DEFAULT_REGISTER_PORT = 18813
 
 
 def config_path() -> Path:

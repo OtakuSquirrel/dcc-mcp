@@ -39,7 +39,7 @@ Registration keeps a **live table** in the daemon:
 ### Registration channel
 
 Daemon opens **one** listening socket for DCC registration (config:
-`[daemon] dcc_register_port`, default e.g. 8766, localhost only). Each DCC
+`[daemon] dcc_register_port`, default e.g. 18813, localhost only). Each DCC
 plugin, on launch:
 
 1. Connects to `127.0.0.1:<dcc_register_port>` (retry with backoff until

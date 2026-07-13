@@ -22,6 +22,11 @@ def build_app(mcp_path: str = "/mcp", *, webui: bool = True):
     from dcc_daemon import config
     from dcc_daemon.mcp_server import core, mcp
 
+    if webui:
+        from dcc_daemon.webui.log_buffer import install_log_capture
+
+        install_log_capture()
+
     # Start listening for DCC registrations (idempotent).
     reg_host, reg_port = config.register_bind()
     core.hub.start(reg_host, reg_port)

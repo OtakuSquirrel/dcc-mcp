@@ -8,7 +8,7 @@ thread-safe, so code must run inside a ``bpy.app.timers`` callback.
 Install: copy this folder + ``dcc_socket_server.py`` into Blender's
 addons dir as ``dcc_daemon_blender``, enable in Preferences > Add-ons.
 The addon dials the daemon and registers; no port to pick. Or launch
-headless:  blender --python __init__.py -- [--register-port 8766]
+headless:  blender --python __init__.py -- [--register-port 18813]
 """
 
 from __future__ import annotations
@@ -130,7 +130,7 @@ def unregister() -> None:
 
 
 if __name__ == "__main__":
-    # Headless: `blender --python __init__.py -- [--register-port 8766]`
+    # Headless: `blender --python __init__.py -- [--register-port 18813]`
     argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
     rp = int(argv[argv.index("--register-port") + 1]) if "--register-port" in argv else None
     start(rp)

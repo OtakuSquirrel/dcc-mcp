@@ -223,7 +223,7 @@ def default_info(kind: str, version: str, file: str = "") -> dict:
 
 
 # Default register port — must match dcc_daemon.config.DEFAULT_REGISTER_PORT.
-_DEFAULT_REGISTER_PORT = 8766
+_DEFAULT_REGISTER_PORT = 18813
 
 
 def read_register_port() -> int:

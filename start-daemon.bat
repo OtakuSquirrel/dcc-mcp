@@ -10,9 +10,9 @@ cd /d "%~dp0"
 title dcc-daemon (close window to stop)
 echo ============================================================
 echo   dcc-daemon starting
-echo   MCP:      http://127.0.0.1:8765/mcp   (agents connect here)
-echo   Dashboard http://127.0.0.1:8765/      (open in a browser)
-echo   Register: 127.0.0.1:8766              (DCCs dial in here)
+echo   MCP:      http://127.0.0.1:18812/mcp  (agents connect here)
+echo   Dashboard http://127.0.0.1:18812/     (open in a browser)
+echo   Register: 127.0.0.1:18813             (DCCs dial in here)
 echo.
 echo   Close this window or press Ctrl-C to STOP the daemon.
 echo ============================================================
