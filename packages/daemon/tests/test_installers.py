@@ -32,6 +32,7 @@ def test_scan_detects_houdini_and_maya_user_preferences(tmp_path: Path):
     scan = service.scan()
     installers = {item["kind"]: item for item in scan["installers"]}
     assert installers["houdini"]["targets"][0]["id"] == "houdini-20.5"
+    assert installers["houdini"]["targets"][0]["installation"]["status"] == "not_installed"
     assert installers["maya"]["targets"][0]["id"] == "maya-2026"
     assert installers["blender"]["available"] is True
     assert installers["ue"]["available"] is False
@@ -79,6 +80,9 @@ def test_houdini_install_verify_and_uninstall(tmp_path: Path):
     package = json.loads(package_file.read_text(encoding="utf-8"))
     assert package["path"].endswith("/.dcc-mcp/plugins/houdini/20.5")
     assert service.verify("houdini", "houdini-20.5")["status"] == "installed"
+    scanned = service.scan()
+    houdini = next(item for item in scanned["installers"] if item["kind"] == "houdini")
+    assert houdini["targets"][0]["installation"]["status"] == "installed"
 
     with pytest.raises(InstallerError, match="already used"):
         service.apply_plan("houdini", plan["id"], plan["token"])

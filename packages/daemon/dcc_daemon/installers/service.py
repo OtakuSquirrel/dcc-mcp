@@ -51,12 +51,24 @@ class InstallerService:
                 })
                 continue
             targets = installer.detect()
+            target_rows = []
+            for target in targets:
+                try:
+                    installation = installer.verify(target)
+                except (OSError, ValueError, KeyError) as exc:
+                    installation = {
+                        "ok": False,
+                        "status": "error",
+                        "checks": [],
+                        "error": str(exc),
+                    }
+                target_rows.append({**asdict(target), "installation": installation})
             supported.append({
                 "kind": kind,
                 "title": installer.title,
                 "available": True,
                 "strategy": installer.strategy,
-                "targets": [asdict(target) for target in targets],
+                "targets": target_rows,
             })
         return {
             "platform": {

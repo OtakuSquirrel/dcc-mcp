@@ -28,6 +28,9 @@ def test_dashboard_html():
         assert 'data-tab="logs"' in r.text
         assert 'data-tab="install"' in r.text
         assert 'data-tab="diagnostics"' in r.text
+        assert "Rescan this computer" in r.text
+        assert "Uninstall" in r.text
+        assert "target-path" in r.text
 
 
 def test_api_instances_is_list():

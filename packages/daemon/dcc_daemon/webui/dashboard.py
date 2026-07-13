@@ -62,6 +62,26 @@ _PAGE = """<!doctype html>
   .guide { margin-bottom:12px; } .guide p { margin:6px 0; }
   .log-message { max-width:560px; white-space:pre-wrap; overflow-wrap:anywhere; }
   .service { display:flex; justify-content:space-between; gap:12px; padding:8px 0; border-bottom:1px solid var(--line); }
+  .service > * { min-width:0; }
+  .installer-grid { grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr)); align-items:start; }
+  .installer-card { min-width:0; }
+  .target { border-top:1px solid var(--line); padding:14px 0 2px; margin-top:12px; }
+  .target:first-of-type { margin-top:8px; }
+  .target-head { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+  .target-head h4 { margin:0; font-size:16px; }
+  .target-path { display:block; margin:8px 0 12px; color:var(--muted); overflow-wrap:anywhere; word-break:break-word; }
+  .target-actions { display:flex; flex-wrap:wrap; gap:8px; }
+  .status { border-radius:999px; padding:2px 8px; font-size:11px; white-space:nowrap; background:#343a46; color:var(--muted); }
+  .status.installed { background:#193b2a; color:#6ee7a2; }
+  .status.modified,.status.error { background:#462727; color:#fca5a5; }
+  button.primary { background:#2864c7; border-color:#3475df; color:#fff; }
+  button.danger { color:#fca5a5; border-color:#704040; }
+  button:disabled { cursor:not-allowed; opacity:.45; }
+  #install-preview { min-width:0; overflow:hidden; }
+  .preview-table { table-layout:fixed; }
+  .preview-table th:first-child { width:80px; }
+  .preview-table th:last-child { width:180px; }
+  .preview-table code { white-space:normal; overflow-wrap:anywhere; word-break:break-word; }
   @media (max-width:720px) { .shell { grid-template-columns:1fr; } nav { border-right:0; border-bottom:1px solid var(--line); display:flex; overflow:auto; } nav button { width:auto; white-space:nowrap; } main { padding:16px; } }
 </style>
 </head>
@@ -98,8 +118,8 @@ _PAGE = """<!doctype html>
   <section id="install">
     <h2>Install DCC plugins</h2>
     <p class="muted">The daemon detects local DCC versions and installs into their standard user configuration. Every change is previewed before it is written.</p>
-    <div class="row"><button onclick="scanInstallers()">Scan this computer</button><span class="sub" id="installer-platform"></span></div>
-    <div id="installer-results" class="grid"></div>
+    <div class="row"><button id="scan-installers" onclick="scanInstallers()">Rescan this computer</button><span class="sub" id="installer-platform">Scanning local installations…</span></div>
+    <div id="installer-results" class="grid installer-grid"></div>
     <div id="install-preview" class="card" style="margin-top:12px" hidden></div>
   </section>
 
@@ -175,17 +195,36 @@ async function clearLogView(){ await jsonFetch('/api/logs', {method:'DELETE'}); 
 
 let pendingInstallPlan=null;
 async function scanInstallers(){
-  const data=await jsonFetch('/api/installers/scan', {method:'POST'});
+  const scanButton=document.getElementById('scan-installers');
+  scanButton.disabled=true; scanButton.textContent='Scanning…';
+  let data;
+  try {
+    data=await jsonFetch('/api/installers/scan', {method:'POST'});
+  } catch(error) {
+    document.getElementById('installer-platform').textContent=`Scan failed: ${error.message}`;
+    document.getElementById('installer-results').innerHTML='';
+    return;
+  } finally {
+    scanButton.disabled=false; scanButton.textContent='Rescan this computer';
+  }
   document.getElementById('installer-platform').textContent=`${data.platform.system} ${data.platform.release} / ${data.platform.machine}`;
   document.getElementById('install-preview').hidden=true;
   document.getElementById('installer-results').innerHTML=data.installers.map(item=>{
     const targets=item.targets||[];
-    const targetRows=targets.length ? targets.map(target=>`<div class="service">
-      <span><strong>${esc(target.label)}</strong><br><span class="muted">${esc(target.install_root)}</span></span>
-      <span><button onclick="previewInstall('${esc(item.kind)}','${esc(target.id)}','install')">Preview install</button>
-      <button onclick="verifyInstall('${esc(item.kind)}','${esc(target.id)}')">Verify</button></span>
-    </div>`).join('') : `<p class="empty">${item.available?'No installation detected.':'Automatic installer is not implemented yet.'}</p>`;
-    return `<div class="card"><h3><span class="kind" style="background:${KIND_COLOR[item.kind]||'#556'}">${esc(item.title||item.kind)}</span></h3>
+    const targetRows=targets.length ? targets.map(target=>{
+      const state=target.installation||{status:'not_installed',ok:false};
+      const managed=state.status!=='not_installed';
+      const installLabel=state.status==='modified'||state.status==='error'?'Repair':(managed?'Reinstall':'Install');
+      const statusLabel=state.status==='not_installed'?'not managed':state.status.replace('_',' ');
+      return `<div class="target">
+        <div class="target-head"><h4>${esc(target.label)}</h4><span class="status ${esc(state.status)}">${esc(statusLabel)}</span></div>
+        <code class="target-path" title="${esc(target.install_root)}">${esc(target.install_root)}</code>
+        <div class="target-actions"><button class="primary" onclick="previewInstall('${esc(item.kind)}','${esc(target.id)}','install')">${installLabel}</button>`+
+        (managed?`<button class="danger" onclick="previewInstall('${esc(item.kind)}','${esc(target.id)}','uninstall')">Uninstall</button>`:
+          `<button class="danger" disabled title="No managed installation">Uninstall</button>`)+
+        `<button onclick="verifyInstall('${esc(item.kind)}','${esc(target.id)}')">Verify</button></div></div>`;
+    }).join('') : `<p class="empty">${item.available?'No installation detected.':'Automatic installer is not implemented yet.'}</p>`;
+    return `<div class="card installer-card"><h3><span class="kind" style="background:${KIND_COLOR[item.kind]||'#556'}">${esc(item.title||item.kind)}</span></h3>
       <p class="muted">${esc(item.strategy)}</p>${targetRows}</div>`;
   }).join('');
 }
@@ -198,7 +237,7 @@ async function previewInstall(kind,targetId,action){
   const preview=document.getElementById('install-preview');
   preview.innerHTML=`<h3>${esc(action)} ${esc(plan.target.label)}</h3>`+
     `<p class="muted">Review these filesystem changes. This confirmation expires in five minutes.</p>`+
-    `<table><thead><tr><th>Action</th><th>Path</th><th>Description</th></tr></thead><tbody>`+
+    `<table class="preview-table"><thead><tr><th>Action</th><th>Path</th><th>Description</th></tr></thead><tbody>`+
     plan.changes.map(change=>`<tr><td>${esc(change.action)}</td><td><code>${esc(change.path)}</code></td><td>${esc(change.description)}</td></tr>`).join('')+
     `</tbody></table><div class="row" style="margin-top:12px"><button onclick="applyInstallPlan()">Confirm ${esc(action)}</button>`+
     `<button onclick="document.getElementById('install-preview').hidden=true">Cancel</button></div>`;
@@ -230,7 +269,7 @@ async function verifyInstall(kind,targetId){
   const preview=document.getElementById('install-preview');
   preview.innerHTML=`<h3>Verification: ${esc(result.status)}</h3>`+
     (result.checks.length?result.checks.map(item=>`<div class="service"><code>${esc(item.path)}</code><span class="${item.ok?'healthy':'ERROR'}">${item.ok?'OK':'changed or missing'}</span></div>`).join(''):'<p>No managed installation was found.</p>')+
-    (result.ok?`<div class="row" style="margin-top:12px"><button onclick="previewInstall('${esc(kind)}','${esc(targetId)}','uninstall')">Preview uninstall</button></div>`:'');
+    (result.status!=='not_installed'?`<div class="row" style="margin-top:12px"><button class="danger" onclick="previewInstall('${esc(kind)}','${esc(targetId)}','uninstall')">Uninstall</button></div>`:'');
   preview.hidden=false;
 }
 
