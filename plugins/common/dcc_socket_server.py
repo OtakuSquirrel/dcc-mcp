@@ -58,7 +58,6 @@ class DCCServer:
         kind: str,
         run_on_main: Callable[[Callable[[], Any]], Any],
         get_info: Callable[[], dict],
-        screenshot: Callable[[], str] | None = None,
         exec_globals: Callable[[], dict] | None = None,
         host: str = "127.0.0.1",
     ):
@@ -67,7 +66,6 @@ class DCCServer:
             kind: "blender" | "houdini" | "ue" | "maya".
             run_on_main: schedule fn on the DCC main thread, return result.
             get_info: identity dict (runs on main thread).
-            screenshot: base64 PNG (runs on main thread). Optional.
             exec_globals: globals dict for execute_python (e.g. {"bpy": bpy}).
             host: daemon registration host. It defaults to localhost and
                 may be set to an explicitly configured backend address.
@@ -75,7 +73,6 @@ class DCCServer:
         self.kind = kind
         self._run_on_main = run_on_main
         self._get_info = get_info
-        self._screenshot = screenshot
         self._exec_globals = exec_globals or (lambda: {})
         self.host = host
         self._sock: socket.socket | None = None
@@ -195,10 +192,6 @@ class DCCServer:
                 return {"result": self._run_on_main(self._get_info)}
             if command == "execute_python":
                 return {"result": self._run_on_main(lambda: self._exec(params.get("code", "")))}
-            if command == "screenshot":
-                if self._screenshot is None:
-                    return {"error": f"screenshot not supported for {self.kind}"}
-                return {"result": {"png_base64": self._run_on_main(self._screenshot)}}
             return {"error": f"unknown command: {command}"}
         except Exception as e:  # noqa: BLE001 — report any DCC-side error to the daemon
             return {"error": f"{type(e).__name__}: {e}", "traceback": traceback.format_exc()}

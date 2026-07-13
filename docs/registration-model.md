@@ -31,7 +31,8 @@ Registration keeps a **live table** in the daemon:
 - Agent → daemon: MCP-over-HTTP is unchanged.
 - The main-thread bridge in each plugin (`run_on_main`: bpy.app.timers /
   slate tick / hdefereval / maya.utils) is unchanged.
-- The command set: `execute_python` / `get_info` / `screenshot` / (ping).
+- The DCC command set: `execute_python` / `get_info` / (ping). Screenshots
+  are captured by the daemon from the registered process's Windows window.
 - `DCCServer._exec`, `_handle` dispatch, JSON framing — reused verbatim.
 
 ## Architecture

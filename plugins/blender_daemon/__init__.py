@@ -13,7 +13,6 @@ headless:  blender --python __init__.py -- [--register-port 18813]
 
 from __future__ import annotations
 
-import base64
 import os
 import queue
 import sys
@@ -85,13 +84,6 @@ def _exec_globals() -> dict:
     return {"bpy": bpy, "mathutils": mathutils}
 
 
-def _screenshot() -> str:
-    path = os.path.join(bpy.app.tempdir, "dcc_daemon_shot.png")
-    bpy.ops.screen.screenshot(filepath=path)
-    with open(path, "rb") as f:
-        return base64.b64encode(f.read()).decode("ascii")
-
-
 def start(register_port: int | None = None) -> None:
     """Connect to the daemon and register. If ``register_port`` is given,
     dial exactly it; otherwise read it from the config file."""
@@ -103,7 +95,6 @@ def start(register_port: int | None = None) -> None:
         run_on_main=_run_on_main,
         get_info=_get_info,
         exec_globals=_exec_globals,
-        screenshot=_screenshot,
     )
     if not bpy.app.timers.is_registered(_drain_jobs):
         bpy.app.timers.register(_drain_jobs, first_interval=0.02, persistent=True)

@@ -23,7 +23,6 @@ the Output Log Python console. Headless:
 
 from __future__ import annotations
 
-import base64
 import os
 import queue
 import sys
@@ -88,18 +87,6 @@ def _exec_globals() -> dict:
     return {"unreal": unreal}
 
 
-def _screenshot() -> str:
-    path = os.path.join(unreal.Paths.project_saved_dir(), "dcc_daemon_shot.png")
-    # High-res screenshot of the active editor viewport.
-    unreal.AutomationLibrary.take_high_res_screenshot(1280, 720, path)
-    # take_high_res_screenshot is queued for the next frame; the file may
-    # not exist yet on the very first call. Read best-effort.
-    if not os.path.exists(path):
-        return ""
-    with open(path, "rb") as f:
-        return base64.b64encode(f.read()).decode("ascii")
-
-
 def start(register_port: int | None = None) -> None:
     """Connect to the daemon and register. Dial ``register_port`` if
     given, else read it from the config file."""
@@ -111,7 +98,6 @@ def start(register_port: int | None = None) -> None:
         run_on_main=_run_on_main,
         get_info=_get_info,
         exec_globals=_exec_globals,
-        screenshot=_screenshot,
     )
     _tick_handle = unreal.register_slate_post_tick_callback(_drain_jobs)
     _server.start(register_port)

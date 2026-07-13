@@ -11,6 +11,7 @@ import logging
 
 from dcc_daemon import health
 from dcc_daemon.hub import HubError, RegistrationHub
+from dcc_daemon.window_capture import capture_process_window
 
 logger = logging.getLogger(__name__)
 
@@ -19,8 +20,9 @@ DCCError = HubError
 
 
 class DaemonCore:
-    def __init__(self, hub: RegistrationHub | None = None):
+    def __init__(self, hub: RegistrationHub | None = None, window_capturer=None):
         self.hub = hub or RegistrationHub()
+        self._window_capturer = window_capturer or capture_process_window
 
     # ── the things any agent can ask for ──
 
@@ -38,12 +40,12 @@ class DaemonCore:
     def health(self, instance_id: str) -> dict:
         return health.check_health(instance_id, self.hub)
 
-    def screenshot(self, instance_id: str) -> str:
-        """Return a base64 PNG of the DCC's viewport/render."""
-        result = self.hub.request(instance_id, "screenshot")
-        if isinstance(result, dict):
-            return str(result.get("png_base64") or result.get("data") or "")
-        return str(result)
+    def screenshot(self, instance_id: str) -> bytes:
+        """Capture the registered process's real Windows application window."""
+        registration = self.hub.get(instance_id)
+        if registration is None:
+            raise KeyError(f"unknown or disconnected instance: {instance_id}")
+        return self._window_capturer(registration.pid)
 
     def get_info(self, instance_id: str) -> dict:
         result = self.hub.request(instance_id, "get_info")

@@ -28,7 +28,7 @@ while the daemon keeps its agent-facing surface small.
 | `list_instances(refresh=False)` | List live DCCs and their `instance_id`, kind, version, pid, and file |
 | `execute_python(instance_id, code)` | Run Python on the DCC main thread and return `result` |
 | `health(instance_id)` | Return a healthy/busy/hung/dead verdict without hanging |
-| `screenshot(instance_id)` | Capture the DCC viewport or render as an image |
+| `screenshot(instance_id)` | Capture the DCC's real Windows application window |
 
 `refresh` is retained for API compatibility but ignored because the
 registration table is already live.

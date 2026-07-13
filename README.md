@@ -55,7 +55,7 @@ resident process.
 |------|---------|
 | `list_instances()` | List registered DCCs → `instance_id`, `kind`, `version`, `pid`, `file`, `connected` |
 | `execute_python(instance_id, code)` | The universal channel — run Python in the DCC, return what it sets as `result` |
-| `screenshot(instance_id)` | Grab the viewport/render as an image the model can see |
+| `screenshot(instance_id)` | Capture the DCC's real Windows application window |
 | `health(instance_id)` | Verdict (healthy/busy/hung/dead) via a main-thread heartbeat — never hangs |
 
 ## One protocol, registration model
@@ -168,7 +168,7 @@ Blender."* Under the hood:
 ```
 list_instances()                    -> [{"instance_id": "blender-1", ...}]
 execute_python("blender-1", "bpy.ops.mesh.primitive_uv_sphere_add()")
-screenshot("blender-1")             -> the viewport image
+screenshot("blender-1")             -> the Windows application window
 ```
 
 There are no per-operation tools — the agent writes `bpy`/`hou`/`unreal`/

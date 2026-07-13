@@ -8,7 +8,7 @@ in tool schemas, which would sit in the system prompt every turn.
 Tools:
   * list_instances()                 — what DCCs are registered
   * execute_python(instance_id, code)— the one channel that does everything
-  * screenshot(instance_id)          — render/grab an image the model can see
+  * screenshot(instance_id)          — capture its Windows application window
   * health(instance_id)              — liveness + responsiveness, never hangs
 
 Claude Code connects with  {"type": "http", "url": ".../mcp"}  — no
@@ -18,8 +18,6 @@ daemon-assigned ``instance_id`` (e.g. "blender-1"), not a port.
 
 from __future__ import annotations
 
-import base64
-import binascii
 import logging
 
 from fastmcp import FastMCP
@@ -41,8 +39,8 @@ mcp = FastMCP(
         "ANYTHING — it runs Python inside that DCC (bpy / hou / unreal / "
         "cmds are in scope) and returns whatever you assign to `result`. "
         "There are no per-operation tools; load the relevant DCC skill "
-        "for code recipes. Use `screenshot(instance_id)` to see the "
-        "viewport/render and `health(instance_id)` if an instance seems "
+        "for code recipes. Use `screenshot(instance_id)` to see its "
+        "Windows application window and `health(instance_id)` if an instance seems "
         "stuck."
     ),
 )
@@ -103,19 +101,13 @@ def health(instance_id: str) -> dict:
 
 @mcp.tool()
 def screenshot(instance_id: str) -> Image:
-    """Capture an image from the DCC `instance_id` so you can see the result.
+    """Capture the real Windows application window for `instance_id`.
 
-    Asks the DCC to grab its viewport (or last render) to a PNG and
-    returns the image bytes directly, so the model sees the picture.
-    The grab mechanism is DCC-specific and implemented by the plugin's
-    `screenshot` command.
+    The daemon locates the top-level window by the registered process ID
+    and captures Windows desktop pixels. It does not call the DCC's
+    viewport capture, playblast, flipbook, screenshot, or render APIs.
 
     Args:
         instance_id: Target instance (from `list_instances`).
     """
-    b64 = core.screenshot(instance_id)
-    try:
-        raw = base64.b64decode(b64, validate=True)
-    except (binascii.Error, ValueError) as e:
-        raise RuntimeError(f"screenshot did not return valid base64 PNG: {e}") from e
-    return Image(data=raw, format="png")
+    return Image(data=core.screenshot(instance_id), format="png")

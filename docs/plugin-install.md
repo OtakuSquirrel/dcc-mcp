@@ -103,7 +103,7 @@ import dcc_daemon_houdini as d; d.start()
 ### Verify
 
 `list_instances()` shows a `houdini` entry. Data ops work headless;
-`screenshot` needs a GUI with a Scene Viewer.
+`screenshot` captures the real Houdini window through Windows and needs a GUI.
 
 ---
 
@@ -196,8 +196,8 @@ import dcc_daemon_maya; dcc_daemon_maya.start()
 
 ### Verify
 
-`list_instances()` shows a `maya` entry. `screenshot` uses a playblast of
-the active viewport (GUI only).
+`list_instances()` shows a `maya` entry. `screenshot` captures the real Maya
+window through Windows; it does not run a playblast (GUI only).
 
 ---
 

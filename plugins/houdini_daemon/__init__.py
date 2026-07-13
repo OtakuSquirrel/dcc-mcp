@@ -21,7 +21,6 @@ script, or paste into the Python Shell:
 
 from __future__ import annotations
 
-import base64
 import os
 import sys
 
@@ -60,19 +59,6 @@ def _exec_globals() -> dict:
     return {"hou": hou}
 
 
-def _screenshot() -> str:
-    path = os.path.join(hou.getenv("HOUDINI_TEMP_DIR") or os.path.expanduser("~"),
-                        "dcc_daemon_hou_shot.png")
-    view = hou.ui.paneTabOfType(hou.paneTabType.SceneViewer)
-    if view is None:
-        raise RuntimeError("no Scene Viewer pane (headless Houdini has no viewport)")
-    settings = view.flipbookSettings()
-    settings.output(path)
-    view.flipbook(view.curViewport(), settings)
-    with open(path, "rb") as f:
-        return base64.b64encode(f.read()).decode("ascii")
-
-
 def start(register_port: int | None = None) -> None:
     """Connect to the daemon and register. Dial ``register_port`` if
     given, else read it from the config file."""
@@ -84,7 +70,6 @@ def start(register_port: int | None = None) -> None:
         run_on_main=_run_on_main,
         get_info=_get_info,
         exec_globals=_exec_globals,
-        screenshot=_screenshot,
     )
     _server.start(register_port)
 

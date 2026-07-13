@@ -58,21 +58,6 @@ def _exec_globals() -> dict:
     return {"cmds": cmds, "mel": mel, "om": om}
 
 
-def _screenshot() -> str:
-    import base64
-    import tempfile
-    path = os.path.join(tempfile.gettempdir(), "dcc_daemon_maya_shot")
-    # playblast a single frame of the active viewport to a PNG
-    out = cmds.playblast(
-        frame=cmds.currentTime(query=True), format="image",
-        compression="png", completeFilename=path + ".png",
-        widthHeight=(1280, 720), showOrnaments=False,
-        offScreen=True, viewer=False, percent=100,
-    )
-    with open(out or path + ".png", "rb") as f:
-        return base64.b64encode(f.read()).decode("ascii")
-
-
 def start(register_port: int | None = None) -> None:
     """Connect to the daemon and register. Dial ``register_port`` if
     given, else read it from the config file."""
@@ -84,7 +69,6 @@ def start(register_port: int | None = None) -> None:
         run_on_main=_run_on_main,
         get_info=_get_info,
         exec_globals=_exec_globals,
-        screenshot=_screenshot,
     )
     _server.start(register_port)
 

@@ -46,7 +46,13 @@ def fake_dcc(request):
     hub = RegistrationHub()
     reg_port = _free_port()
     hub.start("127.0.0.1", reg_port)
-    core = DaemonCore(hub=hub)
+    captured_pids: list[int] = []
+
+    def capture_window(pid: int) -> bytes:
+        captured_pids.append(pid)
+        return b"\x89PNG\r\n\x1a\nwindow-capture"
+
+    core = DaemonCore(hub=hub, window_capturer=capture_window)
 
     # Fake DCC main-thread bridge (queue + worker, like bpy.app.timers).
     jobs: "queue.Queue[tuple]" = queue.Queue()
@@ -82,7 +88,6 @@ def fake_dcc(request):
         run_on_main=run_on_main,
         get_info=lambda: default_info(kind, version, "scene.file"),
         exec_globals=lambda: {"STATE": state},
-        screenshot=lambda: "aVZCT1J3MEtHZ28=",
     )
     server.start(reg_port)  # dial the hub
 
@@ -96,7 +101,7 @@ def fake_dcc(request):
         time.sleep(0.05)
     assert instance_id, "DCC did not register in time"
 
-    yield core, instance_id, state, kind, version
+    yield core, instance_id, state, kind, version, captured_pids
 
     server.stop()
     stop_flag.set()
@@ -104,7 +109,7 @@ def fake_dcc(request):
 
 
 def test_registration_metadata(fake_dcc):
-    core, iid, _, kind, version = fake_dcc
+    core, iid, _, kind, version, _ = fake_dcc
     inst = next(i for i in core.list_instances() if i["instance_id"] == iid)
     assert inst["kind"] == kind
     assert inst["version"] == version
@@ -114,7 +119,7 @@ def test_registration_metadata(fake_dcc):
 
 
 def test_get_info(fake_dcc):
-    core, iid, _, kind, version = fake_dcc
+    core, iid, _, kind, version, _ = fake_dcc
     info = core.get_info(iid)
     assert info["kind"] == kind
     assert info["version"] == version
@@ -140,9 +145,10 @@ def test_health_verdict(fake_dcc):
     assert h["responsive"] is True
 
 
-def test_screenshot_base64(fake_dcc):
-    core, iid, *_ = fake_dcc
-    assert core.screenshot(iid) == "aVZCT1J3MEtHZ28="
+def test_screenshot_uses_registered_process_window(fake_dcc):
+    core, iid, _, _, _, captured_pids = fake_dcc
+    assert core.screenshot(iid) == b"\x89PNG\r\n\x1a\nwindow-capture"
+    assert captured_pids == [os.getpid()]
 
 
 def test_error_propagation(fake_dcc):
@@ -155,7 +161,7 @@ def test_error_propagation(fake_dcc):
 
 
 def test_disconnect_drops_instance(fake_dcc):
-    core, iid, _, _, _ = fake_dcc
+    core, iid, _, _, _, _ = fake_dcc
     # health of an unknown instance is 'dead', not an exception
     dead = core.health("nope-9")
     assert dead["verdict"] == "dead"
