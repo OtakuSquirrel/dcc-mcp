@@ -21,6 +21,12 @@ dcc-daemon = "dcc_daemon.__main__:main"
 [tool.hatch.build.targets.wheel]
 packages = ["dcc_daemon"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"../../plugins/common/dcc_socket_server.py" = "dcc_daemon/installers/payloads/common/dcc_socket_server.py"
+"../../plugins/blender_daemon/__init__.py" = "dcc_daemon/installers/payloads/blender_daemon/__init__.py"
+"../../plugins/houdini_daemon/__init__.py" = "dcc_daemon/installers/payloads/houdini_daemon/__init__.py"
+"../../plugins/maya_daemon/__init__.py" = "dcc_daemon/installers/payloads/maya_daemon/__init__.py"
+
 [tool.pytest.ini_options]
 # plugins/common holds the vendored (non-package) DCC socket server.
 pythonpath = ["../../plugins/common"]

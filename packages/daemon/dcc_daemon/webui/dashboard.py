@@ -4,17 +4,19 @@ from __future__ import annotations
 
 import json
 import logging
+from urllib.parse import urlsplit
 
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, JSONResponse, Response
+from starlette.responses import HTMLResponse, JSONResponse
 
-from dcc_daemon import config
+from dcc_daemon.installers import InstallerService
+from dcc_daemon.installers.base import InstallerError
 from dcc_daemon.mcp_server import core, mcp
 from dcc_daemon.webui.diagnostics import snapshot as diagnostics_snapshot
-from dcc_daemon.webui.install_guides import build_plugin_zip, list_guides
 from dcc_daemon.webui.log_buffer import clear_logs, get_logs
 
 logger = logging.getLogger(__name__)
+installer_service = InstallerService()
 
 _KIND_COLOR = {
     "blender": "#ea7600",
@@ -95,8 +97,10 @@ _PAGE = """<!doctype html>
 
   <section id="install">
     <h2>Install DCC plugins</h2>
-    <p class="muted">Each ZIP contains the DCC adapter and shared connector. Extract or install it using the instructions below.</p>
-    <div id="install-guides"></div>
+    <p class="muted">The daemon detects local DCC versions and installs into their standard user configuration. Every change is previewed before it is written.</p>
+    <div class="row"><button onclick="scanInstallers()">Scan this computer</button><span class="sub" id="installer-platform"></span></div>
+    <div id="installer-results" class="grid"></div>
+    <div id="install-preview" class="card" style="margin-top:12px" hidden></div>
   </section>
 
   <section id="diagnostics">
@@ -117,7 +121,7 @@ document.querySelectorAll('nav button').forEach(button => button.addEventListene
   document.querySelectorAll('nav button').forEach(x => x.classList.toggle('active', x === button));
   document.querySelectorAll('main section').forEach(x => x.classList.toggle('active', x.id === button.dataset.tab));
   if (button.dataset.tab === 'logs') loadLogs();
-  if (button.dataset.tab === 'install') loadGuides();
+  if (button.dataset.tab === 'install') scanInstallers();
   if (button.dataset.tab === 'diagnostics') loadDiagnostics();
 }));
 
@@ -169,18 +173,65 @@ async function loadLogs() {
 
 async function clearLogView(){ await jsonFetch('/api/logs', {method:'DELETE'}); await loadLogs(); }
 
-let guidesLoaded=false;
-async function loadGuides(){
-  if(guidesLoaded) return;
-  const guides=await jsonFetch('/api/install');
-  document.getElementById('install-guides').innerHTML=guides.map(g=>`<div class="card guide">
-    <h3><span class="kind" style="background:${KIND_COLOR[g.kind]||'#556'}">${esc(g.title)}</span></h3>
-    <p><span class="muted">Main-thread bridge</span> · <code>${esc(g.bridge)}</code></p>
-    <p><span class="muted">Registration</span> · <code>${esc(g.register_address)}</code></p>
-    <p>${esc(g.persistent)}</p><pre>${esc(g.temporary)}</pre>
-    <button onclick="location.href='/api/install/${encodeURIComponent(g.kind)}/package'">Download plugin ZIP</button>
-  </div>`).join('');
-  guidesLoaded=true;
+let pendingInstallPlan=null;
+async function scanInstallers(){
+  const data=await jsonFetch('/api/installers/scan', {method:'POST'});
+  document.getElementById('installer-platform').textContent=`${data.platform.system} ${data.platform.release} / ${data.platform.machine}`;
+  document.getElementById('install-preview').hidden=true;
+  document.getElementById('installer-results').innerHTML=data.installers.map(item=>{
+    const targets=item.targets||[];
+    const targetRows=targets.length ? targets.map(target=>`<div class="service">
+      <span><strong>${esc(target.label)}</strong><br><span class="muted">${esc(target.install_root)}</span></span>
+      <span><button onclick="previewInstall('${esc(item.kind)}','${esc(target.id)}','install')">Preview install</button>
+      <button onclick="verifyInstall('${esc(item.kind)}','${esc(target.id)}')">Verify</button></span>
+    </div>`).join('') : `<p class="empty">${item.available?'No installation detected.':'Automatic installer is not implemented yet.'}</p>`;
+    return `<div class="card"><h3><span class="kind" style="background:${KIND_COLOR[item.kind]||'#556'}">${esc(item.title||item.kind)}</span></h3>
+      <p class="muted">${esc(item.strategy)}</p>${targetRows}</div>`;
+  }).join('');
+}
+
+async function previewInstall(kind,targetId,action){
+  const plan=await jsonFetch(`/api/installers/${encodeURIComponent(kind)}/plan`, {
+    method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({target_id:targetId,action})
+  });
+  pendingInstallPlan=plan;
+  const preview=document.getElementById('install-preview');
+  preview.innerHTML=`<h3>${esc(action)} ${esc(plan.target.label)}</h3>`+
+    `<p class="muted">Review these filesystem changes. This confirmation expires in five minutes.</p>`+
+    `<table><thead><tr><th>Action</th><th>Path</th><th>Description</th></tr></thead><tbody>`+
+    plan.changes.map(change=>`<tr><td>${esc(change.action)}</td><td><code>${esc(change.path)}</code></td><td>${esc(change.description)}</td></tr>`).join('')+
+    `</tbody></table><div class="row" style="margin-top:12px"><button onclick="applyInstallPlan()">Confirm ${esc(action)}</button>`+
+    `<button onclick="document.getElementById('install-preview').hidden=true">Cancel</button></div>`;
+  preview.hidden=false;
+  preview.scrollIntoView({behavior:'smooth',block:'nearest'});
+}
+
+async function applyInstallPlan(){
+  const plan=pendingInstallPlan; if(!plan) return;
+  const result=await jsonFetch(`/api/installers/${encodeURIComponent(plan.kind)}/apply`, {
+    method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({plan_id:plan.id,token:plan.token})
+  });
+  pendingInstallPlan=null;
+  await scanInstallers();
+  const preview=document.getElementById('install-preview');
+  const fileResults=(result.files||[]).filter(item=>item.action).map(item=>
+    `<div class="service"><code>${esc(item.path)}</code><span>${esc(item.action)}</span></div>`).join('');
+  preview.innerHTML=`<h3>${result.ok?'Completed':'Needs attention'}</h3><p>${esc(result.action)} finished for <code>${esc(result.target_id)}</code>.</p>`+
+    (!result.ok&&result.manifest?`<p class="muted">Manifest retained: <code>${esc(result.manifest)}</code></p>`:'')+fileResults+
+    ((result.next_steps||[]).length?`<ol>${result.next_steps.map(step=>`<li>${esc(step)}</li>`).join('')}</ol>`:
+      `<p class="muted">Restart the DCC, then check Overview for its registration.</p>`);
+  preview.hidden=false;
+}
+
+async function verifyInstall(kind,targetId){
+  const result=await jsonFetch(`/api/installers/${encodeURIComponent(kind)}/verify`, {
+    method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({target_id:targetId})
+  });
+  const preview=document.getElementById('install-preview');
+  preview.innerHTML=`<h3>Verification: ${esc(result.status)}</h3>`+
+    (result.checks.length?result.checks.map(item=>`<div class="service"><code>${esc(item.path)}</code><span class="${item.ok?'healthy':'ERROR'}">${item.ok?'OK':'changed or missing'}</span></div>`).join(''):'<p>No managed installation was found.</p>')+
+    (result.ok?`<div class="row" style="margin-top:12px"><button onclick="previewInstall('${esc(kind)}','${esc(targetId)}','uninstall')">Preview uninstall</button></div>`:'');
+  preview.hidden=false;
 }
 
 async function loadDiagnostics(){
@@ -235,25 +286,78 @@ async def _api_logs_clear(_request: Request) -> JSONResponse:
     return JSONResponse({"ok": True})
 
 
-async def _api_install(_request: Request) -> JSONResponse:
-    host, port = config.register_bind()
-    return JSONResponse(list_guides(f"{host}:{port}"))
-
-
-async def _api_install_package(request: Request) -> Response:
-    kind = str(request.path_params.get("kind", ""))
+def _local_origin(request: Request) -> bool:
+    origin = request.headers.get("origin")
+    if not origin:
+        return True
     try:
-        data, filename = build_plugin_zip(kind)
-    except KeyError:
-        return JSONResponse({"error": f"unknown DCC kind: {kind}"}, status_code=404)
-    except FileNotFoundError as exc:
-        logger.warning("plugin package unavailable: %s", exc)
-        return JSONResponse({"error": str(exc)}, status_code=503)
-    return Response(
-        data,
-        media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        parsed = urlsplit(origin)
+        origin_port = parsed.port
+    except ValueError:
+        return False
+    return (
+        parsed.scheme in {"http", "https"}
+        and parsed.hostname in {"127.0.0.1", "localhost", "::1"}
+        and origin_port == request.url.port
     )
+
+
+async def _json_body(request: Request) -> dict:
+    try:
+        body = await request.json()
+    except (ValueError, json.JSONDecodeError) as exc:
+        raise InstallerError("request body must be valid JSON") from exc
+    if not isinstance(body, dict):
+        raise InstallerError("request body must be a JSON object")
+    return body
+
+
+def _installer_error(exc: InstallerError) -> JSONResponse:
+    return JSONResponse({"error": str(exc)}, status_code=400)
+
+
+async def _api_installer_scan(_request: Request) -> JSONResponse:
+    return JSONResponse(installer_service.scan())
+
+
+async def _api_installer_plan(request: Request) -> JSONResponse:
+    if not _local_origin(request):
+        return JSONResponse({"error": "cross-origin installer requests are forbidden"}, status_code=403)
+    try:
+        body = await _json_body(request)
+        return JSONResponse(installer_service.create_plan(
+            str(request.path_params.get("kind", "")),
+            str(body.get("target_id", "")),
+            str(body.get("action", "install")),
+        ))
+    except InstallerError as exc:
+        return _installer_error(exc)
+
+
+async def _api_installer_apply(request: Request) -> JSONResponse:
+    if not _local_origin(request):
+        return JSONResponse({"error": "cross-origin installer requests are forbidden"}, status_code=403)
+    try:
+        body = await _json_body(request)
+        return JSONResponse(installer_service.apply_plan(
+            str(request.path_params.get("kind", "")),
+            str(body.get("plan_id", "")),
+            str(body.get("token", "")),
+        ))
+    except (InstallerError, OSError) as exc:
+        logger.warning("installer apply failed: %s", exc)
+        return _installer_error(InstallerError(str(exc)))
+
+
+async def _api_installer_verify(request: Request) -> JSONResponse:
+    try:
+        body = await _json_body(request)
+        return JSONResponse(installer_service.verify(
+            str(request.path_params.get("kind", "")),
+            str(body.get("target_id", "")),
+        ))
+    except (InstallerError, OSError) as exc:
+        return _installer_error(InstallerError(str(exc)))
 
 
 async def _api_diagnostics(_request: Request) -> JSONResponse:
@@ -267,6 +371,8 @@ def register_webui() -> None:
     mcp.custom_route("/api/health/{instance_id}", methods=["GET"])(_api_health)
     mcp.custom_route("/api/logs", methods=["GET"])(_api_logs)
     mcp.custom_route("/api/logs", methods=["DELETE"])(_api_logs_clear)
-    mcp.custom_route("/api/install", methods=["GET"])(_api_install)
-    mcp.custom_route("/api/install/{kind}/package", methods=["GET"])(_api_install_package)
+    mcp.custom_route("/api/installers/scan", methods=["POST"])(_api_installer_scan)
+    mcp.custom_route("/api/installers/{kind}/plan", methods=["POST"])(_api_installer_plan)
+    mcp.custom_route("/api/installers/{kind}/apply", methods=["POST"])(_api_installer_apply)
+    mcp.custom_route("/api/installers/{kind}/verify", methods=["POST"])(_api_installer_verify)
     mcp.custom_route("/api/diagnostics", methods=["GET"])(_api_diagnostics)

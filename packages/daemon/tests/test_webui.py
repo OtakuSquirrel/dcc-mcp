@@ -7,9 +7,7 @@ the dashboard HTML and the two JSON endpoints without needing a live DCC.
 
 from __future__ import annotations
 
-import io
 import logging
-import zipfile
 
 from starlette.testclient import TestClient
 
@@ -74,31 +72,26 @@ def test_api_logs_capture_filter_and_clear():
         assert client.get("/api/logs?search=log-marker").json() == []
 
 
-def test_api_install_guides():
+def test_api_installer_scan():
     with _client() as client:
-        r = client.get("/api/install")
+        r = client.post("/api/installers/scan")
         assert r.status_code == 200
-        guides = r.json()
-        assert {guide["kind"] for guide in guides} == {"blender", "houdini", "ue", "maya"}
-        assert all(guide["register_address"].endswith(":18813") for guide in guides)
+        data = r.json()
+        assert data["platform"]["system"]
+        assert {item["kind"] for item in data["installers"]} == {
+            "blender", "houdini", "ue", "maya"
+        }
+        assert next(item for item in data["installers"] if item["kind"] == "maya")["available"]
 
 
-def test_api_plugin_package():
+def test_api_installer_plan_rejects_cross_origin():
     with _client() as client:
-        r = client.get("/api/install/blender/package")
-        assert r.status_code == 200
-        assert r.headers["content-type"] == "application/zip"
-        with zipfile.ZipFile(io.BytesIO(r.content)) as archive:
-            assert set(archive.namelist()) == {
-                "dcc_daemon_blender/__init__.py",
-                "dcc_daemon_blender/dcc_socket_server.py",
-            }
-
-
-def test_api_plugin_package_unknown_kind():
-    with _client() as client:
-        r = client.get("/api/install/nope/package")
-        assert r.status_code == 404
+        r = client.post(
+            "/api/installers/maya/plan",
+            headers={"Origin": "https://example.com"},
+            json={"target_id": "maya-2026"},
+        )
+        assert r.status_code == 403
 
 
 def test_api_diagnostics():

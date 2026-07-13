@@ -108,8 +108,8 @@ console window that streams logs live; close the window to stop the
 daemon.
 
 **Is it running?** Open <http://127.0.0.1:18812/> in a browser. The local
-WebUI provides instance monitoring, a bounded daemon log viewer, downloadable
-plugin packages with installation instructions, and read-only diagnostics.
+WebUI provides instance monitoring, a bounded daemon log viewer, local DCC
+detection and installation, and read-only diagnostics.
 It uses initial/manual refresh rather than periodic polling. Or check the
 port: `Get-NetTCPConnection -LocalPort 18812` (Windows) /
 `lsof -i:18812` (macOS/Linux).
@@ -130,9 +130,15 @@ reachable — so start the daemon *first*, then (re)start your agent
 
 ### 4. Install a DCC plugin
 
-Each DCC needs the small connector that dials the daemon. Assemble a
-folder with **both** the per-DCC file and the shared connector next to
-each other, then load it. Blender example:
+Open the WebUI **Install** tab and click **Scan this computer**. Blender,
+Houdini, and Maya support preview-and-confirm installation, verification, and
+manifest-based uninstall. Blender still needs its installed add-on enabled in
+Preferences; Houdini and Maya start automatically after restart.
+
+Unreal Engine is the next automatic installer. Until then, its manual flow and
+the Blender development-checkout flow remain available. Blender example:
+
+Assemble a folder with **both** the per-DCC file and the shared connector:
 
 ```bash
 # stage the addon (both files must sit together)

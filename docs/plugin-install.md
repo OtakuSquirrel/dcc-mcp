@@ -1,9 +1,13 @@
 # DCC plugin installation guide
 
-> Draft for review. Describes how to install the daemon-side plugin into
-> each DCC so the daemon can discover and drive it. Once reviewed, some
-> of this can be automated (one-click install from the WebUI); for now
-> these are the manual steps.
+The WebUI **Install** tab is the primary installation path. It detects the
+operating system and local DCC preference directories, previews exact file
+changes, and requires explicit confirmation before writing. Installations are
+recorded under `~/.dcc-mcp/installations/` for verification and safe uninstall.
+
+Blender, Houdini, and Maya installation files are automated. Blender requires
+one final enable action in Preferences. Unreal Engine remains a manual fallback
+until its engine/project scope installer is completed.
 
 Every DCC embeds the **same** small connector
 (`plugins/common/dcc_socket_server.py`). On launch it **dials the daemon**
@@ -38,7 +42,13 @@ launching it.
 
 Wires the shared server to Blender's main thread via `bpy.app.timers`.
 
-### Option A — addon (persistent)
+### Recommended — WebUI user add-on installer
+
+Scan, select the Blender version, preview, and confirm. Restart Blender, then
+enable **DCC Daemon Bridge** in Preferences > Add-ons. The installer avoids
+editing Blender's binary preferences while Blender may be running.
+
+### Manual fallback — addon
 
 1. Make a folder `dcc_daemon_blender/` containing **both**
    `plugins/blender_daemon/__init__.py` and
@@ -64,7 +74,15 @@ Wires the shared server to the main thread via
 `hdefereval.executeInMainThreadWithResult`. (Previously Houdini used
 `hrpyc`/RPyC; it now uses the same socket plugin as everything else.)
 
-### Option A — startup script (persistent)
+### Recommended — WebUI Package installer
+
+Scan in the WebUI, select the Houdini version, preview the plan, and confirm.
+The installer writes `dcc_daemon.json` to that version's `packages` directory.
+It points at `~/.dcc-mcp/plugins/houdini/<version>/`, which contains the adapter plus
+`scripts/123.py` and `scripts/456.py`. It does not modify `houdini.env` or an
+existing personal startup script. Restart Houdini after installation.
+
+### Manual fallback — startup script
 
 1. Put `plugins/houdini_daemon/__init__.py` and
    `plugins/common/dcc_socket_server.py` on `$HOUDINI_PATH` (e.g.
@@ -124,7 +142,15 @@ Wires the shared server to the main thread via
 queue/timer). Requires interactive GUI Maya (not batch `mayapy`). The
 daemon deliberately does **not** use Maya's built-in `commandPort`.
 
-### Option A — `userSetup.py` (persistent)
+### Recommended — WebUI Module installer
+
+Scan in the WebUI, select the Maya version, preview the plan, and confirm. The
+installer writes `dcc_daemon.mod` under that version's `modules` directory.
+The module points at `~/.dcc-mcp/plugins/maya/<version>/`, whose `scripts` directory has
+an isolated `userSetup.py`. It does not edit your personal `userSetup.py`.
+Restart Maya after installation.
+
+### Manual fallback — `userSetup.py`
 
 1. Put `plugins/maya_daemon/__init__.py` and
    `plugins/common/dcc_socket_server.py` in a scripts dir on Maya's
