@@ -1,5 +1,4 @@
-"""The daemon core — owns the RegistrationHub and exposes it to whatever
-ingress (MCP-over-HTTP, WebSocket tunnel) is attached.
+"""The daemon core — owns the RegistrationHub used by MCP-over-HTTP.
 
 One process, one hub. DCCs register with the hub (dial in and hold a
 connection); the core routes agent requests to them by ``instance_id``.
@@ -15,8 +14,7 @@ from dcc_daemon.hub import HubError, RegistrationHub
 
 logger = logging.getLogger(__name__)
 
-# Re-export so ingress layers (tunnel client) can catch DCC-side errors
-# without importing the hub directly.
+# Public DCC-side execution error exposed by the core API.
 DCCError = HubError
 
 

@@ -5,11 +5,10 @@ Wires the shared, DCC-agnostic ``DCCServer`` (from
 
 Why not UE's built-in Python Remote Execution? That protocol uses UDP
 multicast discovery plus a *reverse* connection (the editor dials back to
-the client), which breaks the daemon's uniform "scan a TCP port, connect
-to it" model. Embedding the same socket server every other DCC uses keeps
-UE on the identical JSON channel and the identical adapter
-(``JsonSocketAdapter``, selected by the 20811+ port range) — the daemon
-needs no UE-specific code.
+the client), rather than the daemon's uniform registration protocol.
+Embedding the shared connector keeps UE on the same JSON channel as every
+other DCC: it dials the daemon, registers, and receives an ``instance_id``.
+The daemon needs no UE-specific routing code.
 
 The only UE-specific piece is ``run_on_main``: the ``unreal`` API must be
 touched on the game thread, so network threads enqueue jobs that a

@@ -42,14 +42,12 @@ To make an agent work with a given DCC you pre-configure the matching
 **DCCs register; the daemon doesn't scan.** Each DCC dials the daemon on
 launch and holds one connection. So the daemon has a **live registry** —
 `list_instances` is a memory read, death detection is free (socket
-closes), and the pid arrives at registration (no port-scraping). This is
-the same inversion the cloud tunnel uses (dial out, hold, push down).
+closes), and the pid arrives at registration (no port-scraping).
 
 **A daemon, not a spawned subprocess.** Long-lived and process-
-independent, it serves several agents at once and accepts remote agents
-over an outbound tunnel — all through the same routing code. Discovery
-and health queries (constant during connect/reconnect) are answered by
-this one resident process.
+independent, it serves several local agents at once. Discovery and health
+queries (constant during connect/reconnect) are answered by this one
+resident process.
 
 ## Meta-tools (agent-facing)
 
@@ -93,7 +91,7 @@ DCC its plugin → drive it.** Verified end-to-end with Blender.
 ### 1. Install
 
 ```bash
-uv sync --extra dev          # create .venv, install the daemon + dcc-relay CLIs
+uv sync --extra dev          # create .venv and install the daemon CLI
 ```
 
 ### 2. Run the daemon (keep it running)
@@ -192,10 +190,8 @@ packages/daemon/            the daemon (guardian)
     health.py               liveness + main-thread heartbeat; never hangs
     mcp_server.py           the 4 meta-tools over MCP/HTTP
     webui/                  monitoring dashboard (mounted on the MCP app)
-    tunnel/                 cloud reverse tunnel: protocol + relay + client + tokens
     app.py                  builds the ASGI app (MCP + WebUI); starts the hub
     __main__.py             `dcc-daemon` entry point
-    relay_main.py           `dcc-relay` entry point
   tests/                    tests against real protocol stand-ins
 plugins/common/             DCC-agnostic connector (dials + registers), vendored per DCC
 plugins/blender_daemon/     Blender addon (bpy.app.timers bridge)
@@ -203,33 +199,8 @@ plugins/houdini_daemon/     Houdini plugin (hdefereval bridge)
 plugins/ue_daemon/          Unreal script (slate post-tick bridge)
 plugins/maya_daemon/        Maya plugin (executeInMainThreadWithResult bridge)
 skills/dcc-control/         agent skill: how to drive DCCs via execute_python (SKILL.md + references/)
-docs/                       plugin-install guide; registration-model + tunnel-hardening notes
+docs/                       plugin-install guide + registration-model design note
 ```
-
-## Remote agents (cloud tunnel)
-
-A home daemon behind NAT has no public IP and opens no ports. To let a
-remote agent reach it, both the daemon and the agent dial **out** to a
-relay you deploy; the relay pairs them by `daemon_id` and forwards frames.
-It executes nothing.
-
-```
- cloud agent ──WSS(access_token)──▶  relay  ◀──WSS(pair_token)── home daemon ─▶ DCCs
-```
-
-```bash
-# On the relay host (public):
-dcc-relay add-daemon --tokens tokens.json           # -> daemon_id + pair_token
-dcc-relay add-agent  --tokens tokens.json --daemon-id dccbox-...  # -> access_token
-dcc-relay serve      --tokens tokens.json --certfile … --keyfile …
-
-# On the home machine:
-dcc-daemon --relay-url wss://relay.example/ --daemon-id dccbox-... --pair-token …
-```
-
-The agent side needs only the `daemon_id` + `access_token`. Two token
-types: `pair_token` authenticates a daemon to the relay; `access_token`
-authorizes an agent for one daemon. Both compared with `hmac.compare_digest`.
 
 ## Testing
 
@@ -242,13 +213,8 @@ real protocol**, exercising the daemon's actual code paths:
   and error propagation.
 - `tests/test_webui.py` — the dashboard + JSON APIs via Starlette's
   TestClient.
-- `tests/test_tunnel.py` — the real relay + daemon tunnel client + a
-  registered fake DCC + an agent, over loopback WebSockets: token auth
-  (accept + reject) and a full agent→relay→daemon→DCC round-trip with
-  error propagation.
-
 ```bash
-uv run pytest packages/daemon/tests/   # 39 tests
+uv run pytest packages/daemon/tests/   # 37 tests
 uv run ruff check packages/ plugins/
 ```
 
@@ -261,11 +227,9 @@ verified manually against running DCCs.
 - **Done:** guardian daemon; registration model (DCCs dial in, live
   registry, free death detection); one JSON protocol across Blender,
   Houdini, Unreal, Maya; main-thread-heartbeat health; MCP-over-HTTP
-  ingress; monitoring WebUI; outbound WebSocket tunnel + relay + token
-  auth for remote agents; tests.
+  ingress; monitoring WebUI; tests.
 - **Next:** one-click install + autostart; plugin-install UI in the WebUI;
-  DCC-side skill packaging for cloud agents; hardening the tunnel (rate
-  limits, token rotation) for real deployment.
+  real-DCC integration coverage; protocol and reconnect hardening.
 
 ## License
 

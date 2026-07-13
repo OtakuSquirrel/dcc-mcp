@@ -301,7 +301,6 @@ dependencies = [
     { name = "fastmcp" },
     { name = "starlette" },
     { name = "uvicorn" },
-    { name = "websockets" },
 ]
 
 [package.metadata]
@@ -309,7 +308,6 @@ requires-dist = [
     { name = "fastmcp", specifier = ">=3.0" },
     { name = "starlette", specifier = ">=0.37" },
     { name = "uvicorn", specifier = ">=0.29" },
-    { name = "websockets", specifier = ">=13.0" },
 ]
 
 [[package]]

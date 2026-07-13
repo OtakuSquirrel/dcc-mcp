@@ -2,42 +2,16 @@
 
 Starts the long-lived local daemon. By default it serves MCP over HTTP
 on 127.0.0.1 (local agents connect with {"type":"http", "url":...}) plus
-the monitoring WebUI. If a relay URL + credentials are given, it also
-opens an outbound tunnel so remote agents can reach it (Phase 2).
-
-Local ingress (uvicorn) and the tunnel client share nothing but the
-process; each DaemonCore talks to the same DCCs by port.
+the monitoring WebUI. DCC applications connect to its registration port
+and are addressed by ``instance_id``.
 """
 
 from __future__ import annotations
 
 import argparse
-import asyncio
 import logging
-import os
-import threading
 
 from dcc_daemon import config
-
-
-def _start_tunnel(relay_url: str, daemon_id: str, pair_token: str,
-                  insecure_tls: bool = False) -> None:
-    """Run the outbound tunnel client in a background thread + loop.
-
-    Uses the SAME DaemonCore (and thus the same registration hub) as the
-    local MCP ingress, so remote agents reach the same live DCCs."""
-    from dcc_daemon.mcp_server import core
-    from dcc_daemon.tunnel.client import TunnelClient
-
-    def _run():
-        client = TunnelClient(relay_url, daemon_id, pair_token, core=core,
-                              insecure_tls=insecure_tls)
-        asyncio.run(client.run_forever())
-
-    threading.Thread(target=_run, name="dcc-tunnel", daemon=True).start()
-    logging.getLogger(__name__).info(
-        "dcc-daemon: tunnel dialing %s as %s%s", relay_url, daemon_id,
-        " (TLS cert verification DISABLED)" if insecure_tls else "")
 
 
 def main() -> None:
@@ -53,30 +27,11 @@ def main() -> None:
                         help="MCP HTTP path (default /mcp)")
     parser.add_argument("--no-webui", action="store_true",
                         help="Serve MCP only; disable the monitoring dashboard")
-    parser.add_argument("--relay-url", default=os.environ.get("DCC_RELAY_URL"),
-                        help="Cloud relay WSS URL; enables the outbound tunnel")
-    parser.add_argument("--daemon-id", default=os.environ.get("DCC_DAEMON_ID"),
-                        help="This daemon's id registered at the relay")
-    parser.add_argument("--pair-token", default=os.environ.get("DCC_PAIR_TOKEN"),
-                        help="Secret proving this daemon's identity to the relay")
-    parser.add_argument("--insecure-tls", action="store_true",
-                        default=bool(os.environ.get("DCC_RELAY_INSECURE_TLS")),
-                        help="Skip certificate verification for a wss:// relay-url "
-                             "(needed for a self-signed cert on a bare IP, e.g. no "
-                             "domain available). Traffic is still encrypted; the cert "
-                             "just isn't CA-validated. Prefer a real cert when possible.")
     parser.add_argument("--log-level", default="INFO")
     args = parser.parse_args()
 
     logging.basicConfig(level=args.log_level.upper())
     log = logging.getLogger(__name__)
-
-    # Optional outbound tunnel — only if fully configured.
-    if args.relay_url:
-        if not (args.daemon_id and args.pair_token):
-            parser.error("--relay-url requires --daemon-id and --pair-token")
-        _start_tunnel(args.relay_url, args.daemon_id, args.pair_token,
-                     insecure_tls=args.insecure_tls)
 
     # Import late so --help stays fast and import errors surface clearly.
     import uvicorn

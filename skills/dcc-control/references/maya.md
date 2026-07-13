@@ -75,7 +75,7 @@ result = str(dag.fullPathName())
 
 ## Screenshot
 
-`screenshot(port)` does a single-frame `playblast` of the active viewport
+`screenshot(instance_id)` does a single-frame `playblast` of the active viewport
 to a PNG. It needs the GUI viewport; on headless Maya it won't work. For
 non-visual checks, read scene state back via `execute_python`.
 

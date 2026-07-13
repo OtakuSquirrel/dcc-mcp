@@ -3,8 +3,8 @@
 Status: **implemented.** The second segment (daemon ↔ DCC) is now a
 *registration* model: each DCC dials the daemon on launch, registers, and
 holds one connection; the daemon keeps a live table and pushes requests
-down. This doc records the design and rationale. Agent-facing side
-(stream-HTTP + tunnel) is unchanged.
+down. This doc records the design and rationale. The agent-facing side
+remains MCP-over-HTTP.
 
 ## Why
 
@@ -26,13 +26,9 @@ Registration keeps a **live table** in the daemon:
   a scanned pool. Smaller system footprint — closer to the "guardian"
   goal.
 
-This is the same inversion the cloud tunnel already uses (daemon dials
-*out* to the relay, relay pushes requests down the held connection). We
-are copying that proven shape to the DCC segment.
-
 ## What does NOT change
 
-- Agent → daemon: stream-HTTP (local) and WSS tunnel (cloud) untouched.
+- Agent → daemon: MCP-over-HTTP is unchanged.
 - The main-thread bridge in each plugin (`run_on_main`: bpy.app.timers /
   slate tick / hdefereval / maya.utils) is unchanged.
 - The command set: `execute_python` / `get_info` / `screenshot` / (ping).
@@ -107,10 +103,10 @@ Verdicts stay: `healthy | busy | hung | dead(=disconnected) | unknown`.
 
 | Obstacle | Handling |
 |----------|----------|
-| DCC starts before daemon / daemon restarts | Plugin retries `connect` with backoff (copy `tunnel/client.py`'s loop). Daemon restart ⇒ all DCCs reconnect; a few-second gap where they were unreachable anyway. |
+| DCC starts before daemon / daemon restarts | Plugin retries `connect` with exponential backoff. Daemon restart ⇒ all DCCs reconnect; a few-second gap where they were unreachable anyway. |
 | Frozen DCC still holds socket | Main-thread heartbeat (above), not socket state, decides responsiveness. |
 | Agent handle churn | `port` → `instance_id` across meta-tools + skill. One-time, mechanical. |
-| Ordering of replies over one socket | Multiplex by request `id` (tunnel already does this). Per-instance lock keeps main-thread calls serialized. |
+| Ordering of replies over one socket | Multiplex by request `id`. Per-instance lock keeps main-thread calls serialized. |
 | Config | Drop `[ports] dcc = [...]` pool entirely. Add `[daemon] dcc_register_port`. `read_dcc_ports`/`dcc_ports`/`claim_and_start` removed. |
 | Old pull model references | `TransportPool`, port scanning in `registry.py`, `find_pid_for_port` — removed. |
 
@@ -140,7 +136,7 @@ Verdicts stay: `healthy | busy | hung | dead(=disconnected) | unknown`.
 - 4 plugins: call the new register-and-hold entry instead of
   `claim_and_start`.
 - skill `SKILL.md` + `references/*`: port → instance_id wording.
-- tests: registry/e2e/tunnel fixtures drive the register handshake
+- tests: registry/e2e fixtures drive the register handshake
   instead of starting a listening server; drop `test_claim_port`.
 - docs: README + plugin-install updated (no port pool; register port).
 

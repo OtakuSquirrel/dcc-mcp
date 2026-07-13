@@ -49,7 +49,7 @@ obj.data.materials.append(mat)
 result = mat.name
 ```
 
-Render to a file (then `screenshot(port)` won't show a saved render —
+Render to a file (then `screenshot(instance_id)` won't show a saved render —
 read the file path back instead, or use the viewport):
 ```python
 scene = bpy.context.scene
@@ -76,7 +76,7 @@ result = bpy.path.abspath(scene.render.filepath)
 
 ## Screenshot
 
-`screenshot(port)` calls `bpy.ops.screen.screenshot` — it captures the
+`screenshot(instance_id)` calls `bpy.ops.screen.screenshot` — it captures the
 Blender **window/UI**, not a clean render. For a rendered image, render
 to a file (above) and report the path; for framing/layout checks the
 screenshot is fine.

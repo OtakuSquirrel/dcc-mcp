@@ -26,14 +26,14 @@ and `health` are infrastructure; **everything creative or inspective is
 
 ## Core loop
 
-1. **Discover** — `list_instances()`; pick the `port` whose `kind`
+1. **Discover** — `list_instances()`; pick the `instance_id` whose `kind`
    matches the task (`blender` / `houdini` / `ue` / `maya`).
-2. **Act** — `execute_python(port, code)`. Return data by assigning to
+2. **Act** — `execute_python(instance_id, code)`. Return data by assigning to
    `result`:
    ```python
    result = [o.name for o in bpy.data.objects]   # comes back to you
    ```
-3. **Verify** — `screenshot(port)` to look, or another `execute_python`
+3. **Verify** — `screenshot(instance_id)` to look, or another `execute_python`
    to read state back. Don't assume an edit worked; confirm it.
 
 ## Before writing DCC code — load the right reference

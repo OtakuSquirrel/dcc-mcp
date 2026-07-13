@@ -80,7 +80,7 @@ result = {
 
 ## Screenshot
 
-`screenshot(port)` uses the Scene Viewer flipbook to grab the viewport.
+`screenshot(instance_id)` uses the Scene Viewer flipbook to grab the viewport.
 It needs a running Houdini **GUI** with a Scene Viewer pane — on a
 headless/batch Houdini it will error. For headless verification, read
 geometry stats back via `execute_python` instead.
@@ -89,6 +89,6 @@ geometry stats back via `execute_python` instead.
 
 Houdini's side is the same socket-server plugin as the other DCCs, wired
 to the main thread via `hdefereval`. A human starts it (from a startup
-script or the Python Shell); it claims a port from the configured pool.
-If `list_instances` doesn't show a Houdini you expect, its plugin may not
-be started yet.
+script or the Python Shell); it dials the daemon's registration port and
+receives an `instance_id`. If `list_instances` doesn't show a Houdini you
+expect, its plugin may not be started or connected yet.

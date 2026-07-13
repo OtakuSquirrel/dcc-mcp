@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "dcc-mcp"
 version = "0.1.0"
-description = "Unified local daemon for agent → DCC control (Blender, Houdini, Unreal Engine)."
+description = "Unified local daemon for agent → DCC control (Blender, Houdini, Unreal Engine, Maya)."
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.11"

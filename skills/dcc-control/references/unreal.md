@@ -73,7 +73,7 @@ result = [a.get_actor_label() for a in eas.get_all_level_actors()]
 
 ## Screenshot
 
-`screenshot(port)` issues a high-res screenshot of the active editor
+`screenshot(instance_id)` issues a high-res screenshot of the active editor
 viewport; the capture is queued for the next frame, so on the very first
 call the file may not be ready yet — if you get an empty result, take it
 again. For non-visual verification, read level/actor state back via
@@ -82,7 +82,7 @@ again. For non-visual verification, read level/actor state back via
 ## Why UE uses the socket server (context)
 
 UE also ships a "Python Remote Execution" feature, but it relies on UDP
-multicast discovery and a reverse connection, which doesn't fit the
-daemon's "scan a TCP port, connect to it" model. So UE embeds the same
-socket-server plugin the other DCCs use; from your side it's identical
-to Blender — just `execute_python` with `unreal` in scope.
+multicast discovery and its own connection model. The daemon instead uses
+one registration protocol across every DCC: UE embeds the shared connector,
+dials the daemon, and receives an `instance_id`. From your side it is
+identical to Blender — just `execute_python` with `unreal` in scope.

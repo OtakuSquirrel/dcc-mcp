@@ -1,12 +1,12 @@
 """dcc-daemon — unified local entry point for agent → DCC control.
 
 A single long-lived process that:
-  * exposes ~5 meta-tools to local agents over MCP-over-HTTP,
-  * (Phase 2) accepts cloud agents over an outbound WebSocket tunnel,
+  * exposes four meta-tools to local agents over MCP-over-HTTP,
   * routes every request down to a DCC instance via ONE channel:
-    ``execute_python(port, code)`` over newline-delimited TCP+JSON.
+    ``execute_python(instance_id, code)`` over newline-delimited TCP+JSON.
 
-Design tenet: "端口 + 命令解决一切" — port + command solves everything.
+The daemon assigns each registered DCC an ``instance_id``; callers never
+address DCC-specific ports or transports.
 All DCC domain knowledge lives in Skills, not in tool schemas.
 """
 

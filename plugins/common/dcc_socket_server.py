@@ -69,8 +69,8 @@ class DCCServer:
             get_info: identity dict (runs on main thread).
             screenshot: base64 PNG (runs on main thread). Optional.
             exec_globals: globals dict for execute_python (e.g. {"bpy": bpy}).
-            host: daemon host — keep 127.0.0.1; remote access is via the
-                daemon's own tunnel, never a DCC listening publicly.
+            host: daemon registration host. It defaults to localhost and
+                may be set to an explicitly configured backend address.
         """
         self.kind = kind
         self._run_on_main = run_on_main
