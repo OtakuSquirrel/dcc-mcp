@@ -74,6 +74,7 @@ _PAGE = """<!doctype html>
   .status { border-radius:999px; padding:2px 8px; font-size:11px; white-space:nowrap; background:#343a46; color:var(--muted); }
   .status.installed { background:#193b2a; color:#6ee7a2; }
   .status.modified,.status.error { background:#462727; color:#fca5a5; }
+  .installer-note { margin:10px 0; padding:9px 10px; border-left:3px solid #f59e0b; background:#2a251b; color:#f6d38a; border-radius:4px; }
   button.primary { background:#2864c7; border-color:#3475df; color:#fff; }
   button.danger { color:#fca5a5; border-color:#704040; }
   button:disabled { cursor:not-allowed; opacity:.45; }
@@ -225,7 +226,7 @@ async function scanInstallers(){
         `<button onclick="verifyInstall('${esc(item.kind)}','${esc(target.id)}')">Verify</button></div></div>`;
     }).join('') : `<p class="empty">${item.available?'No installation detected.':'Automatic installer is not implemented yet.'}</p>`;
     return `<div class="card installer-card"><h3><span class="kind" style="background:${KIND_COLOR[item.kind]||'#556'}">${esc(item.title||item.kind)}</span></h3>
-      <p class="muted">${esc(item.strategy)}</p>${targetRows}</div>`;
+      <p class="muted">${esc(item.strategy)}</p>${item.note?`<p class="installer-note">${esc(item.note)}</p>`:''}${targetRows}</div>`;
   }).join('');
 }
 

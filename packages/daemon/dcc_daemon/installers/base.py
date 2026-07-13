@@ -81,6 +81,7 @@ class BaseInstaller:
     kind = ""
     title = ""
     strategy = ""
+    note = ""
 
     def __init__(self, home: Path, repo_root: Path) -> None:
         self.home = home.resolve()

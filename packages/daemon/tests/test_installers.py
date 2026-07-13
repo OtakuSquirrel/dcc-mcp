@@ -35,6 +35,7 @@ def test_scan_detects_houdini_and_maya_user_preferences(tmp_path: Path):
     assert installers["houdini"]["targets"][0]["installation"]["status"] == "not_installed"
     assert installers["maya"]["targets"][0]["id"] == "maya-2026"
     assert installers["blender"]["available"] is True
+    assert "Preferences > Add-ons" in installers["blender"]["note"]
     assert installers["ue"]["available"] is False
 
 

@@ -31,6 +31,7 @@ def test_dashboard_html():
         assert "Rescan this computer" in r.text
         assert "Uninstall" in r.text
         assert "target-path" in r.text
+        assert "installer-note" in r.text
 
 
 def test_api_instances_is_list():

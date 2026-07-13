@@ -13,6 +13,10 @@ class BlenderInstaller(BaseInstaller):
     kind = "blender"
     title = "Blender"
     strategy = "Blender user add-on"
+    note = (
+        "After installation, open Edit > Preferences > Add-ons, enable "
+        "DCC Daemon Bridge, and save preferences."
+    )
 
     def _version_roots(self) -> list[Path]:
         system = platform.system()
@@ -62,6 +66,7 @@ class BlenderInstaller(BaseInstaller):
         result = self._write_files(self.copy_payload(self._module_root(target)), target)
         result["next_steps"] = [
             "Restart Blender.",
-            "Open Preferences > Add-ons and enable DCC Daemon Bridge.",
+            "Open Edit > Preferences > Add-ons and enable DCC Daemon Bridge.",
+            "Save preferences so the add-on remains enabled after restart.",
         ]
         return result

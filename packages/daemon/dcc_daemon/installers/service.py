@@ -68,6 +68,7 @@ class InstallerService:
                 "title": installer.title,
                 "available": True,
                 "strategy": installer.strategy,
+                "note": installer.note,
                 "targets": target_rows,
             })
         return {
