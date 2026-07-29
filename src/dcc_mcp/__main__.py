@@ -1,4 +1,4 @@
-"""Entry point: `dcc-daemon`.
+"""Entry point: `dcc-mcp`.
 
 Starts the long-lived local daemon. By default it serves MCP over HTTP
 on 127.0.0.1 (local agents connect with {"type":"http", "url":...}) plus
@@ -11,12 +11,12 @@ from __future__ import annotations
 import argparse
 import logging
 
-from dcc_daemon import config
+from dcc_mcp import config
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="dcc-daemon — unified local entry point for agent → DCC control",
+        description="dcc-mcp — unified local entry point for agent → DCC control",
     )
     default_host, default_port = config.http_bind()
     default_register_host, default_register_port = config.register_bind()
@@ -39,7 +39,7 @@ def main() -> None:
     # Import late so --help stays fast and import errors surface clearly.
     import uvicorn
 
-    from dcc_daemon.app import build_app
+    from dcc_mcp.app import build_app
 
     app = build_app(
         mcp_path=args.path,
@@ -47,9 +47,9 @@ def main() -> None:
         registration_bind=(default_register_host, args.register_port),
     )
 
-    log.info("dcc-daemon: MCP at http://%s:%d%s", args.host, args.port, args.path)
+    log.info("dcc-mcp: MCP at http://%s:%d%s", args.host, args.port, args.path)
     if not args.no_webui:
-        log.info("dcc-daemon: dashboard at http://%s:%d/", args.host, args.port)
+        log.info("dcc-mcp: dashboard at http://%s:%d/", args.host, args.port)
 
     uvicorn.run(
         app,

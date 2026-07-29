@@ -6,7 +6,7 @@ from PyInstaller.utils.hooks import collect_submodules, copy_metadata
 
 
 repo_root = Path(SPECPATH).parents[1]
-daemon_root = repo_root / "packages" / "daemon"
+daemon_root = repo_root / "src"
 
 datas = []
 for distribution in ("fastmcp", "mcp", "pydantic", "starlette", "uvicorn"):
@@ -14,19 +14,19 @@ for distribution in ("fastmcp", "mcp", "pydantic", "starlette", "uvicorn"):
 
 payloads = {
     repo_root / "plugins" / "common" / "dcc_socket_server.py": (
-        "dcc_daemon/installers/payloads/common"
+        "dcc_mcp/installers/payloads/common"
     ),
     repo_root / "plugins" / "blender_daemon" / "__init__.py": (
-        "dcc_daemon/installers/payloads/blender_daemon"
+        "dcc_mcp/installers/payloads/blender_daemon"
     ),
     repo_root / "plugins" / "houdini_daemon" / "__init__.py": (
-        "dcc_daemon/installers/payloads/houdini_daemon"
+        "dcc_mcp/installers/payloads/houdini_daemon"
     ),
     repo_root / "plugins" / "maya_daemon" / "__init__.py": (
-        "dcc_daemon/installers/payloads/maya_daemon"
+        "dcc_mcp/installers/payloads/maya_daemon"
     ),
     repo_root / "plugins" / "ue_daemon" / "__init__.py": (
-        "dcc_daemon/installers/payloads/ue_daemon"
+        "dcc_mcp/installers/payloads/ue_daemon"
     ),
 }
 datas += [(str(source), destination) for source, destination in payloads.items()]
@@ -57,7 +57,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name="dcc-daemon",
+    name="dcc-mcp",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

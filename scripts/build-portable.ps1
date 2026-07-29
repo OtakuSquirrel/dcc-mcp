@@ -34,19 +34,19 @@ foreach ($Target in @($PortableRoot, $ZipPath)) {
     --clean `
     --distpath $ArtifactsRoot `
     --workpath $WorkRoot `
-    (Join-Path $RepoRoot "packaging\windows\dcc-daemon.spec")
+    (Join-Path $RepoRoot "packaging\windows\dcc-mcp.spec")
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed with exit code $LASTEXITCODE" }
 
 Copy-Item -LiteralPath (Join-Path $RepoRoot "packaging\windows\PORTABLE-README.txt") `
     -Destination (Join-Path $PortableRoot "README.txt")
 
 foreach ($Required in @(
-    "dcc-daemon.exe",
-    "_internal\dcc_daemon\installers\payloads\common\dcc_socket_server.py",
-    "_internal\dcc_daemon\installers\payloads\blender_daemon\__init__.py",
-    "_internal\dcc_daemon\installers\payloads\houdini_daemon\__init__.py",
-    "_internal\dcc_daemon\installers\payloads\maya_daemon\__init__.py",
-    "_internal\dcc_daemon\installers\payloads\ue_daemon\__init__.py"
+    "dcc-mcp.exe",
+    "_internal\dcc_mcp\installers\payloads\common\dcc_socket_server.py",
+    "_internal\dcc_mcp\installers\payloads\blender_daemon\__init__.py",
+    "_internal\dcc_mcp\installers\payloads\houdini_daemon\__init__.py",
+    "_internal\dcc_mcp\installers\payloads\maya_daemon\__init__.py",
+    "_internal\dcc_mcp\installers\payloads\ue_daemon\__init__.py"
 )) {
     if (-not (Test-Path -LiteralPath (Join-Path $PortableRoot $Required))) {
         throw "Portable artifact is missing required file: $Required"
@@ -55,7 +55,7 @@ foreach ($Required in @(
 
 if (-not $SkipSmokeTest) {
     & (Join-Path $RepoRoot "scripts\smoke-test-portable.ps1") `
-        -Executable (Join-Path $PortableRoot "dcc-daemon.exe")
+        -Executable (Join-Path $PortableRoot "dcc-mcp.exe")
     if ($LASTEXITCODE -ne 0) { throw "Portable smoke test failed" }
 }
 

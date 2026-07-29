@@ -10,17 +10,17 @@ import uuid
 from dataclasses import asdict
 from pathlib import Path
 
-from dcc_daemon.installers.base import (
+from dcc_mcp.installers.base import (
     BaseInstaller,
     Change,
     InstallPlan,
     InstallerError,
     Target,
 )
-from dcc_daemon.installers.blender import BlenderInstaller
-from dcc_daemon.installers.houdini import HoudiniInstaller
-from dcc_daemon.installers.maya import MayaInstaller
-from dcc_daemon.installers.unreal import UnrealInstaller
+from dcc_mcp.installers.blender import BlenderInstaller
+from dcc_mcp.installers.houdini import HoudiniInstaller
+from dcc_mcp.installers.maya import MayaInstaller
+from dcc_mcp.installers.unreal import UnrealInstaller
 
 
 class InstallerService:

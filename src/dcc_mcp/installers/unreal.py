@@ -10,7 +10,7 @@ import platform
 import re
 from pathlib import Path
 
-from dcc_daemon.installers.base import BaseInstaller, Change, InstallerError, Target
+from dcc_mcp.installers.base import BaseInstaller, Change, InstallerError, Target
 
 _START = "# >>> dcc-daemon managed startup >>>"
 _END = "# <<< dcc-daemon managed startup <<<"

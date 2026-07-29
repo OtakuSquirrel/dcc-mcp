@@ -6,7 +6,7 @@ import re
 import platform
 from pathlib import Path
 
-from dcc_daemon.installers.base import BaseInstaller, Change, InstallerError, Target
+from dcc_mcp.installers.base import BaseInstaller, Change, InstallerError, Target
 
 
 class MayaInstaller(BaseInstaller):

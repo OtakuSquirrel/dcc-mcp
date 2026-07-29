@@ -9,11 +9,11 @@ from urllib.parse import urlsplit
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse
 
-from dcc_daemon.installers import InstallerService
-from dcc_daemon.installers.base import InstallerError
-from dcc_daemon.mcp_server import core, mcp
-from dcc_daemon.webui.diagnostics import snapshot as diagnostics_snapshot
-from dcc_daemon.webui.log_buffer import clear_logs, get_logs
+from dcc_mcp.installers import InstallerService
+from dcc_mcp.installers.base import InstallerError
+from dcc_mcp.mcp_server import core, mcp
+from dcc_mcp.webui.diagnostics import snapshot as diagnostics_snapshot
+from dcc_mcp.webui.log_buffer import clear_logs, get_logs
 
 logger = logging.getLogger(__name__)
 installer_service = InstallerService()
@@ -30,7 +30,7 @@ _PAGE = """<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>dcc-daemon</title>
+<title>dcc-mcp</title>
 <style>
   :root { color-scheme:dark; --bg:#14161a; --panel:#1b1f26; --line:#2a2e35; --muted:#9299a4; --text:#e6e8ec; --accent:#67a7ff; }
   * { box-sizing:border-box; }
@@ -89,7 +89,7 @@ _PAGE = """<!doctype html>
 </style>
 </head>
 <body>
-<header><h1>dcc-daemon</h1><span class="sub">local DCC control · <span id="header-status">ready</span></span></header>
+<header><h1>dcc-mcp</h1><span class="sub">local DCC control · <span id="header-status">ready</span></span></header>
 <div class="shell">
 <nav>
   <button class="active" data-tab="overview">Overview</button>

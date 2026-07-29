@@ -23,7 +23,7 @@ import logging
 from fastmcp import FastMCP
 from fastmcp.utilities.types import Image
 
-from dcc_daemon.core import DaemonCore
+from dcc_mcp.core import DaemonCore
 
 logger = logging.getLogger(__name__)
 

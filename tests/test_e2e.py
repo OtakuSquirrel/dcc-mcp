@@ -19,8 +19,8 @@ import time
 import pytest
 
 from dcc_socket_server import DCCServer, default_info
-from dcc_daemon.core import DaemonCore
-from dcc_daemon.hub import RegistrationHub
+from dcc_mcp.core import DaemonCore
+from dcc_mcp.hub import RegistrationHub
 
 _CASES = [
     ("blender", "4.2.0"),
@@ -152,7 +152,7 @@ def test_screenshot_uses_registered_process_window(fake_dcc):
 
 
 def test_error_propagation(fake_dcc):
-    from dcc_daemon.core import DCCError
+    from dcc_mcp.core import DCCError
     core, iid, *_ = fake_dcc
     with pytest.raises(DCCError) as ei:
         core.execute_python(iid, "raise ValueError('boom')")

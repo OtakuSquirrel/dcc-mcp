@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import time
 
-from dcc_daemon import __version__, config
+from dcc_mcp import __version__, config
 
 _STARTED_AT = time.monotonic()
 

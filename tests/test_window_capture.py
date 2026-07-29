@@ -1,4 +1,4 @@
-from dcc_daemon.window_capture import WindowCandidate, _select_main_window
+from dcc_mcp.window_capture import WindowCandidate, _select_main_window
 
 
 def _candidate(hwnd, width, height, *, owned=False, minimized=False):

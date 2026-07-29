@@ -1,4 +1,4 @@
-"""dcc-daemon — unified local entry point for agent → DCC control.
+"""dcc-mcp — unified local entry point for agent → DCC control.
 
 A single long-lived process that:
   * exposes four meta-tools to local agents over MCP-over-HTTP,

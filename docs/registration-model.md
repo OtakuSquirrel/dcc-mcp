@@ -125,7 +125,7 @@ Verdicts stay: `healthy | busy | hung | dead(=disconnected) | unknown`.
 - `plugins/common/dcc_socket_server.py`: `accept()` server → `connect()`
   client with register handshake + reconnect loop; drop
   `claim_and_start`/`read_dcc_ports`.
-- `packages/daemon/dcc_daemon/registry.py`: scan → live registration hub
+- `src/dcc_mcp/hub.py`: scan → live registration hub
   + `send()`.
 - `.../transport.py`: removed (folded into the hub) or reduced to the
   frame codec.

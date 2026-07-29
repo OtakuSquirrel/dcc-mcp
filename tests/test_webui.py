@@ -11,7 +11,7 @@ import logging
 
 from starlette.testclient import TestClient
 
-from dcc_daemon.app import build_app
+from dcc_mcp.app import build_app
 
 
 def _client() -> TestClient:
@@ -23,7 +23,7 @@ def test_dashboard_html():
     with _client() as client:
         r = client.get("/")
         assert r.status_code == 200
-        assert "<title>dcc-daemon</title>" in r.text
+        assert "<title>dcc-mcp</title>" in r.text
         assert "setInterval" not in r.text
         assert 'data-tab="logs"' in r.text
         assert 'data-tab="install"' in r.text

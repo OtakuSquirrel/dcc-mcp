@@ -24,11 +24,11 @@ def build_app(
     """Return the ASGI app serving MCP at ``mcp_path`` and, if ``webui``,
     the dashboard at ``/``. Also starts the DCC registration hub listener
     so DCCs can dial in."""
-    from dcc_daemon import config
-    from dcc_daemon.mcp_server import core, mcp
+    from dcc_mcp import config
+    from dcc_mcp.mcp_server import core, mcp
 
     if webui:
-        from dcc_daemon.webui.log_buffer import install_log_capture
+        from dcc_mcp.webui.log_buffer import install_log_capture
 
         install_log_capture()
 
@@ -38,7 +38,7 @@ def build_app(
 
     if webui:
         try:
-            from dcc_daemon.webui.dashboard import register_webui
+            from dcc_mcp.webui.dashboard import register_webui
 
             register_webui()
         except ImportError:

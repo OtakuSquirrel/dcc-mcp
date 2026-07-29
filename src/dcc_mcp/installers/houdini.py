@@ -7,7 +7,7 @@ import platform
 import re
 from pathlib import Path
 
-from dcc_daemon.installers.base import BaseInstaller, Change, InstallerError, Target
+from dcc_mcp.installers.base import BaseInstaller, Change, InstallerError, Target
 
 
 class HoudiniInstaller(BaseInstaller):

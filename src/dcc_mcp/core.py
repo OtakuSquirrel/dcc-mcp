@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import logging
 
-from dcc_daemon import health
-from dcc_daemon.hub import HubError, RegistrationHub
-from dcc_daemon.window_capture import capture_process_window
+from dcc_mcp import health
+from dcc_mcp.hub import HubError, RegistrationHub
+from dcc_mcp.window_capture import capture_process_window
 
 logger = logging.getLogger(__name__)
 

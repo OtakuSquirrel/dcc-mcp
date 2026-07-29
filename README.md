@@ -6,7 +6,7 @@ a single, uniform channel.
 
 ## What it is
 
-One long-lived process (`dcc-daemon`) — the **guardian** — runs on the
+One long-lived process (`dcc-mcp`) — the **guardian** — runs on the
 machine where the DCCs run. It is the single entry point between agents
 and DCCs:
 
@@ -16,7 +16,7 @@ and DCCs:
   and pushes work to them over one uniform protocol.
 
 ```
-  agent ── MCP / HTTP ──▶  dcc-daemon  ◀── register ── Blender  ┐
+  agent ── MCP / HTTP ──▶  dcc-mcp  ◀── register ── Blender  ┐
   (Claude Code)            (guardian)  ◀── register ── Houdini  │ DCCs dial IN
                                        ◀── register ── Unreal   │ and hold a
                                        ◀── register ── Maya     ┘ connection
@@ -100,7 +100,7 @@ The daemon is a resident "guardian" — start it once and leave it up; it
 is independent of any agent.
 
 ```bash
-uv run dcc-daemon            # serves MCP on 127.0.0.1:18812, register hub on :18813
+uv run dcc-mcp            # serves MCP on 127.0.0.1:18812, register hub on :18813
 ```
 
 On Windows, double-click **`start-daemon.bat`** instead — it opens a
@@ -193,17 +193,16 @@ Missing/malformed file → built-in defaults, so a fresh machine just works.
 ## Layout
 
 ```
-packages/daemon/            the daemon (guardian)
-  dcc_daemon/
-    core.py                 DaemonCore — owns the registration hub
-    hub.py                  RegistrationHub — accepts DCC registrations, routes requests by id
-    config.py               reads ~/.dcc-mcp/config.toml (the two listen ports)
-    health.py               liveness + main-thread heartbeat; never hangs
-    mcp_server.py           the 4 meta-tools over MCP/HTTP
-    webui/                  overview, logs, plugin install, and diagnostics UI
-    app.py                  builds the ASGI app (MCP + WebUI); starts the hub
-    __main__.py             `dcc-daemon` entry point
-  tests/                    tests against real protocol stand-ins
+src/dcc_mcp/                the daemon (guardian)
+  core.py                 DaemonCore — owns the registration hub
+  hub.py                  RegistrationHub — accepts DCC registrations, routes requests by id
+  config.py               reads ~/.dcc-mcp/config.toml (the two listen ports)
+  health.py               liveness + main-thread heartbeat; never hangs
+  mcp_server.py           the 4 meta-tools over MCP/HTTP
+  webui/                  overview, logs, plugin install, and diagnostics UI
+  app.py                  builds the ASGI app (MCP + WebUI); starts the hub
+  __main__.py             `dcc-mcp` entry point
+tests/                      tests against real protocol stand-ins
 plugins/common/             DCC-agnostic connector (dials + registers), vendored per DCC
 plugins/blender_daemon/     Blender addon (bpy.app.timers bridge)
 plugins/houdini_daemon/     Houdini plugin (hdefereval bridge)
@@ -225,8 +224,8 @@ real protocol**, exercising the daemon's actual code paths:
 - `tests/test_webui.py` — the dashboard + JSON APIs via Starlette's
   TestClient.
 ```bash
-uv run pytest packages/daemon/tests/   # 52 tests
-uv run ruff check packages/ plugins/
+uv run pytest tests/   # 52 tests
+uv run ruff check src/ plugins/
 ```
 
 What this does **not** cover — real bpy/hou/unreal/cmds API calls,

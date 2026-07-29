@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from dcc_daemon.installers.base import InstallerError
-from dcc_daemon.installers.service import InstallerService
+from dcc_mcp.installers.base import InstallerError
+from dcc_mcp.installers.service import InstallerService
 
 
 def _fake_repo(root: Path) -> Path:
