@@ -27,6 +27,11 @@ _CASES = [
     ("houdini", "20.5.0"),
     ("ue", "5.4.0"),
     ("maya", "2025"),
+    # Tuanjie's real connector is C#, but the daemon is kind-agnostic: this
+    # exercises registration/routing/health for the "tuanjie" kind over the
+    # identical wire protocol (the fake end still runs the shared Python
+    # DCCServer — the protocol layer is what's under test, not C# execution).
+    ("tuanjie", "2022.3.62t12"),
 ]
 
 
@@ -160,9 +165,90 @@ def test_error_propagation(fake_dcc):
     assert ei.value.traceback
 
 
+def test_tool_surfaces_traceback(fake_dcc, monkeypatch):
+    """The MCP tool must fold .traceback into the message.
+
+    FastMCP renders only str(exc), so a bare DCCError would drop the DCC-side
+    stack trace — the one thing that makes an in-DCC failure diagnosable.
+    """
+    from fastmcp.exceptions import ToolError
+
+    from dcc_mcp import mcp_server
+    core, iid, *_ = fake_dcc
+    monkeypatch.setattr(mcp_server, "core", core)
+    with pytest.raises(ToolError) as ei:
+        mcp_server.execute_python(iid, "raise ValueError('boom')")
+    assert "boom" in str(ei.value)
+    assert "Traceback (most recent call last)" in str(ei.value)
+
+
 def test_disconnect_drops_instance(fake_dcc):
     core, iid, _, _, _, _ = fake_dcc
     # health of an unknown instance is 'dead', not an exception
     dead = core.health("nope-9")
     assert dead["verdict"] == "dead"
     assert dead["connected"] is False
+
+
+def test_heartbeat_refreshes_last_seen(fake_dcc):
+    """A heartbeat frame from the DCC must advance the daemon's last_seen
+    (and be silently ignored, not mistaken for a request reply)."""
+    import json
+
+    core, iid, *_ = fake_dcc
+    conn = core.hub.get(iid)._conn
+    before = conn.last_seen
+
+    # Send a heartbeat straight down the fake DCC's socket, exactly as the
+    # plugin's heartbeat loop does, and confirm the daemon records liveness.
+    dcc_sock = _dcc_live_socket()
+    assert dcc_sock is not None, "no live DCC socket to send heartbeat"
+    dcc_sock.sendall((json.dumps({"type": "heartbeat"}) + "\n").encode("utf-8"))
+
+    for _ in range(100):
+        if conn.last_seen > before:
+            break
+        time.sleep(0.02)
+
+    assert conn.alive is True
+    assert conn.last_seen > before, "heartbeat did not refresh last_seen"
+    # And it must not have been consumed as a pending reply.
+    assert not conn._pending
+
+
+def _dcc_live_socket():
+    """Find the fake DCC's live outbound socket via the DCCServer instance.
+
+    The e2e fake DCC runs the shared DCCServer; grab its current socket to
+    emit a raw heartbeat frame without waiting the real interval."""
+    import gc
+
+    from dcc_socket_server import DCCServer
+    for obj in gc.get_objects():
+        if isinstance(obj, DCCServer) and getattr(obj, "_sock", None) is not None:
+            return obj._sock
+    return None
+
+
+def test_reaper_culls_silent_connection(fake_dcc, monkeypatch):
+    """A connection that stops being seen past the timeout is reaped and
+    the instance unregistered (half-open detection)."""
+    from dcc_mcp import hub as hub_mod
+
+    core, iid, *_ = fake_dcc
+    conn = core.hub.get(iid)._conn
+
+    # Make it look long-silent; the reaper runs every _REAPER_INTERVAL.
+    # The reaper may currently be mid-sleep on the old interval, so allow
+    # enough wall time to cover one full original _REAPER_INTERVAL.
+    monkeypatch.setattr(hub_mod, "_HEARTBEAT_TIMEOUT", 0.1)
+    monkeypatch.setattr(hub_mod, "_REAPER_INTERVAL", 0.05)
+    conn.last_seen = time.monotonic() - 5.0
+
+    for _ in range(140):  # up to ~7s: covers a full original reaper cycle
+        if not any(i["instance_id"] == iid for i in core.list_instances()):
+            break
+        time.sleep(0.05)
+    assert not any(i["instance_id"] == iid for i in core.list_instances()), \
+        "reaper did not cull the silent connection"
+

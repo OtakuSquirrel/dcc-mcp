@@ -23,6 +23,7 @@ _KIND_COLOR = {
     "houdini": "#ff4713",
     "ue": "#0e88c8",
     "maya": "#35a66f",
+    "tuanjie": "#c2c2c2",
 }
 
 _PAGE = """<!doctype html>
@@ -85,6 +86,12 @@ _PAGE = """<!doctype html>
   .preview-table code { white-space:normal; overflow-wrap:anywhere; word-break:break-word; }
   .project-picker { display:flex; gap:8px; align-items:center; margin:12px 0; }
   .project-picker input { flex:1; min-width:0; }
+  .tool-card { min-width:0; }
+  .tool-head { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:6px; }
+  .tool-name { font-size:15px; font-weight:650; background:transparent; padding:0; }
+  .tool-call { background:#0f1420; border:1px solid #24304a; color:#8fd0ff; }
+  .tool-more { margin-top:8px; } .tool-more summary { cursor:pointer; color:var(--muted); }
+  .tool-more table { margin-top:8px; }
   @media (max-width:720px) { .shell { grid-template-columns:1fr; } nav { border-right:0; border-bottom:1px solid var(--line); display:flex; overflow:auto; } nav button { width:auto; white-space:nowrap; } main { padding:16px; } }
 </style>
 </head>
@@ -93,6 +100,7 @@ _PAGE = """<!doctype html>
 <div class="shell">
 <nav>
   <button class="active" data-tab="overview">Overview</button>
+  <button data-tab="tools">Tools</button>
   <button data-tab="logs">Logs</button>
   <button data-tab="install">Install</button>
   <button data-tab="diagnostics">Diagnostics</button>
@@ -104,6 +112,17 @@ _PAGE = """<!doctype html>
     <div class="row" style="margin-top:18px"><button onclick="loadInstances(true)">Refresh</button><span class="sub" id="instance-status"></span></div>
     <table><thead><tr><th>Kind</th><th>Instance</th><th>Version</th><th>PID</th><th>File</th><th>Health</th></tr></thead><tbody id="instance-rows"></tbody></table>
     <p class="empty" id="instance-empty" hidden>No DCC instances registered. Open Install for setup instructions.</p>
+  </section>
+
+  <section id="tools">
+    <h2>Tools</h2>
+    <p class="muted">There are <strong>no per-DCC tools</strong>. Every instance — Blender, Houdini, Unreal, Maya — is driven by the same handful of meta-tools below; all creative work happens by sending Python through <code>execute_python</code>. Pick an instance to see the exact calls.</p>
+    <div class="row">
+      <select id="tool-instance"><option value="">— generic (no instance) —</option></select>
+      <button onclick="loadTools()">Refresh</button>
+      <span class="sub" id="tool-status"></span>
+    </div>
+    <div id="tool-cards" class="grid"></div>
   </section>
 
   <section id="logs">
@@ -144,6 +163,7 @@ document.querySelectorAll('nav button').forEach(button => button.addEventListene
   document.querySelectorAll('nav button').forEach(x => x.classList.toggle('active', x === button));
   document.querySelectorAll('main section').forEach(x => x.classList.toggle('active', x.id === button.dataset.tab));
   if (button.dataset.tab === 'logs') loadLogs();
+  if (button.dataset.tab === 'tools') loadTools();
   if (button.dataset.tab === 'install') scanInstallers();
   if (button.dataset.tab === 'diagnostics') loadDiagnostics();
 }));
@@ -228,20 +248,20 @@ async function scanInstallers(){
         `<button onclick="verifyInstall('${esc(item.kind)}','${esc(target.id)}')">Verify</button></div></div>`;
     }).join('') : `<p class="empty">${item.available?'No installation detected.':'Automatic installer is not implemented yet.'}</p>`;
     const projectPicker=item.accepts_project_path?`<div class="project-picker">
-      <input id="ue-project-path" placeholder="C:/path/to/Project.uproject" aria-label="Unreal project path">
-      <button onclick="addUnrealProject()">Add project</button></div><p class="sub" id="ue-project-status">Project scope installs only into that project's Plugins folder.</p>`:'';
+      <input id="project-path-${esc(item.kind)}" placeholder="${item.kind==='tuanjie'?'C:/path/to/TuanjieProject':'C:/path/to/Project.uproject'}" aria-label="${esc(item.title||item.kind)} project path">
+      <button onclick="addProject('${esc(item.kind)}')">Add project</button></div><p class="sub" id="project-status-${esc(item.kind)}">Project scope installs only into that project's folder.</p>`:'';
     return `<div class="card installer-card"><h3><span class="kind" style="background:${KIND_COLOR[item.kind]||'#556'}">${esc(item.title||item.kind)}</span></h3>
       <p class="muted">${esc(item.strategy)}</p>${item.note?`<p class="installer-note">${esc(item.note)}</p>`:''}${projectPicker}${targetRows}</div>`;
   }).join('');
 }
 
-async function addUnrealProject(){
-  const input=document.getElementById('ue-project-path');
-  const status=document.getElementById('ue-project-status');
+async function addProject(kind){
+  const input=document.getElementById('project-path-'+kind);
+  const status=document.getElementById('project-status-'+kind);
   const path=input.value.trim();
-  if(!path){status.textContent='Enter a .uproject file or project directory.';return;}
+  if(!path){status.textContent='Enter a project path.';return;}
   try {
-    await jsonFetch('/api/installers/ue/projects', {
+    await jsonFetch(`/api/installers/${encodeURIComponent(kind)}/projects`, {
       method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path})
     });
     await scanInstallers();
@@ -307,6 +327,60 @@ async function loadDiagnostics(){
 }
 
 loadInstances(false);
+
+let toolCatalog=[];
+async function loadTools(){
+  const status=document.getElementById('tool-status');
+  status.textContent='loading…';
+  try {
+    const [tools,instances]=await Promise.all([
+      jsonFetch('/api/tools'),
+      jsonFetch('/api/instances'),
+    ]);
+    toolCatalog=tools.tools||[];
+    const select=document.getElementById('tool-instance');
+    const previous=select.value;
+    select.innerHTML='<option value="">— generic (no instance) —</option>'+
+      instances.map(item=>`<option value="${esc(item.instance_id)}">${esc(item.instance_id)} · ${esc(item.kind||'?')}</option>`).join('');
+    if([...select.options].some(o=>o.value===previous)) select.value=previous;
+    select.onchange=renderTools;
+    renderTools();
+    status.textContent=instances.length?`${instances.length} instance(s) · same ${toolCatalog.length} tools drive all`:'no instances registered — showing generic calls';
+  } catch(error){ status.textContent=error.message; }
+}
+
+function renderTools(){
+  const select=document.getElementById('tool-instance');
+  const chosen=instanceById(select.value);
+  const idArg=chosen?`"${chosen.instance_id}"`:'"<instance_id>"';
+  document.getElementById('tool-cards').innerHTML=toolCatalog.map(tool=>{
+    const call=tool.name==='list_instances'
+      ? `${tool.name}(${(tool.parameters[0]||{}).name?(tool.parameters[0].name+'=…'):''})`
+      : tool.signature.replace(/\binstance_id\b/, idArg);
+    const scope=tool.targets_instance
+      ? (chosen?`<span class="kind" style="background:${KIND_COLOR[chosen.kind]||'#556'}">${esc(chosen.instance_id)}</span>`:'<span class="status">any instance</span>')
+      : '<span class="status">daemon-wide</span>';
+    const params=tool.parameters.length?`<details class="tool-more"><summary>${tool.parameters.length} parameter(s)</summary>`+
+      `<table><thead><tr><th>Name</th><th>Type</th><th>Req</th><th>Description</th></tr></thead><tbody>`+
+      tool.parameters.map(p=>`<tr><td><code>${esc(p.name)}</code></td><td>${esc(p.type)}</td><td>${p.required?'yes':'—'}</td><td>${esc(p.description)}</td></tr>`).join('')+
+      `</tbody></table></details>`:'';
+    const full=tool.description&&tool.description!==tool.summary
+      ? `<details class="tool-more"><summary>Full description</summary><pre>${esc(tool.description)}</pre></details>`:'';
+    return `<div class="card tool-card">
+      <div class="tool-head"><code class="tool-name">${esc(tool.name)}</code>${scope}</div>
+      <p class="muted">${esc(tool.summary)}</p>
+      <pre class="tool-call">${esc(call)}</pre>${params}${full}</div>`;
+  }).join('');
+}
+
+function instanceById(id){
+  const select=document.getElementById('tool-instance');
+  const option=[...select.options].find(o=>o.value===id&&id);
+  if(!option) return null;
+  const [instance_id,kind]=option.textContent.split(' · ');
+  return {instance_id:instance_id.trim(), kind:(kind||'').trim()};
+}
+
 </script>
 </body>
 </html>""".replace("__KIND_COLOR__", json.dumps(_KIND_COLOR))
@@ -420,14 +494,49 @@ async def _api_installer_verify(request: Request) -> JSONResponse:
         return _installer_error(InstallerError(str(exc)))
 
 
-async def _api_unreal_project(request: Request) -> JSONResponse:
+async def _api_project(request: Request) -> JSONResponse:
     if not _local_origin(request):
         return JSONResponse({"error": "cross-origin installer requests are forbidden"}, status_code=403)
     try:
         body = await _json_body(request)
-        return JSONResponse(installer_service.add_unreal_project(str(body.get("path", ""))))
+        kind = str(request.path_params.get("kind", ""))
+        return JSONResponse(installer_service.add_project(kind, str(body.get("path", ""))))
     except (InstallerError, OSError) as exc:
         return _installer_error(InstallerError(str(exc)))
+
+# Tools that address a specific DCC instance (everything except list_instances).
+_INSTANCE_TOOLS = {"execute_python", "health", "screenshot"}
+
+
+def _serialize_tool(tool) -> dict:
+    """Flatten a FastMCP tool into the shape the WebUI renders."""
+    description = (tool.description or "").strip()
+    summary = description.split("\n", 1)[0].strip()
+    schema = getattr(tool, "parameters", None) or {}
+    properties = schema.get("properties", {}) if isinstance(schema, dict) else {}
+    required = set(schema.get("required", []) if isinstance(schema, dict) else [])
+    parameters = [
+        {
+            "name": name,
+            "type": spec.get("type", "any"),
+            "description": (spec.get("description") or "").strip(),
+            "required": name in required,
+        }
+        for name, spec in properties.items()
+    ]
+    return {
+        "name": tool.name,
+        "summary": summary,
+        "description": description,
+        "signature": f"{tool.name}({', '.join(p['name'] for p in parameters)})",
+        "parameters": parameters,
+        "targets_instance": tool.name in _INSTANCE_TOOLS,
+    }
+
+
+async def _api_tools(_request: Request) -> JSONResponse:
+    tools = sorted(await mcp.list_tools(), key=lambda t: t.name != "list_instances")
+    return JSONResponse({"tools": [_serialize_tool(tool) for tool in tools]})
 
 
 async def _api_diagnostics(_request: Request) -> JSONResponse:
@@ -438,6 +547,7 @@ def register_webui() -> None:
     """Attach local WebUI routes to the FastMCP HTTP app."""
     mcp.custom_route("/", methods=["GET"])(_index)
     mcp.custom_route("/api/instances", methods=["GET"])(_api_instances)
+    mcp.custom_route("/api/tools", methods=["GET"])(_api_tools)
     mcp.custom_route("/api/health/{instance_id}", methods=["GET"])(_api_health)
     mcp.custom_route("/api/logs", methods=["GET"])(_api_logs)
     mcp.custom_route("/api/logs", methods=["DELETE"])(_api_logs_clear)
@@ -445,5 +555,5 @@ def register_webui() -> None:
     mcp.custom_route("/api/installers/{kind}/plan", methods=["POST"])(_api_installer_plan)
     mcp.custom_route("/api/installers/{kind}/apply", methods=["POST"])(_api_installer_apply)
     mcp.custom_route("/api/installers/{kind}/verify", methods=["POST"])(_api_installer_verify)
-    mcp.custom_route("/api/installers/ue/projects", methods=["POST"])(_api_unreal_project)
+    mcp.custom_route("/api/installers/{kind}/projects", methods=["POST"])(_api_project)
     mcp.custom_route("/api/diagnostics", methods=["GET"])(_api_diagnostics)

@@ -26,6 +26,7 @@ def test_dashboard_html():
         assert "<title>dcc-mcp</title>" in r.text
         assert "setInterval" not in r.text
         assert 'data-tab="logs"' in r.text
+        assert 'data-tab="tools"' in r.text
         assert 'data-tab="install"' in r.text
         assert 'data-tab="diagnostics"' in r.text
         assert "Rescan this computer" in r.text
@@ -33,7 +34,8 @@ def test_dashboard_html():
         assert "target-path" in r.text
         assert "installer-note" in r.text
         assert "Add project" in r.text
-        assert "/api/installers/ue/projects" in r.text
+        assert "/api/installers/${encodeURIComponent(kind)}/projects" in r.text
+        assert "function addProject(kind)" in r.text
 
 
 def test_api_instances_is_list():
@@ -41,6 +43,22 @@ def test_api_instances_is_list():
         r = client.get("/api/instances")
         assert r.status_code == 200
         assert isinstance(r.json(), list)
+
+
+def test_api_tools_catalog():
+    with _client() as client:
+        r = client.get("/api/tools")
+        assert r.status_code == 200
+        tools = r.json()["tools"]
+        by_name = {t["name"]: t for t in tools}
+        assert set(by_name) == {"list_instances", "execute_python", "health", "screenshot"}
+        # list_instances is daemon-wide; the rest address a specific instance.
+        assert by_name["list_instances"]["targets_instance"] is False
+        assert by_name["execute_python"]["targets_instance"] is True
+        exec_tool = by_name["execute_python"]
+        assert exec_tool["summary"]
+        assert {p["name"] for p in exec_tool["parameters"]} == {"instance_id", "code"}
+        assert "instance_id" in exec_tool["signature"]
 
 
 def test_api_instances_refresh_param():
@@ -85,7 +103,7 @@ def test_api_installer_scan():
         data = r.json()
         assert data["platform"]["system"]
         assert {item["kind"] for item in data["installers"]} == {
-            "blender", "houdini", "ue", "maya"
+  "blender", "houdini", "ue", "maya", "tuanjie"
         }
         assert next(item for item in data["installers"] if item["kind"] == "maya")["available"]
 

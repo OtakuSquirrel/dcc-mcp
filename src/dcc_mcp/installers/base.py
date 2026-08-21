@@ -239,3 +239,34 @@ class BaseInstaller:
             destination / "__init__.py": adapter.read_bytes(),
             destination / "dcc_socket_server.py": connector.read_bytes(),
         }
+
+    def payload_tree_root(self, plugin_dir: str) -> Path:
+        """Locate a whole plugin directory (used by non-Python DCCs).
+
+        Blender/Houdini/Maya/UE vendor exactly two Python files, but a DCC
+        like Tuanjie ships a folder of C# sources + package metadata. This
+        resolves that directory in either the frozen build (payloads/) or a
+        source checkout (plugins/), mirroring ``plugin_source``.
+        """
+        payloads = Path(__file__).resolve().parent / "payloads" / plugin_dir
+        if payloads.is_dir():
+            return payloads
+        source = self.repo_root / "plugins" / plugin_dir
+        if source.is_dir():
+            return source
+        raise InstallerError("plugin payload is unavailable in this daemon installation")
+
+    def copy_payload_tree(self, plugin_dir: str, destination: Path) -> dict[Path, bytes]:
+        """Copy every file under a plugin directory to ``destination``.
+
+        Returns a {path: bytes} map in the shape ``_write_files`` expects, so
+        the whole tree is installed atomically and recorded in the manifest.
+        """
+        root = self.payload_tree_root(plugin_dir)
+        files: dict[Path, bytes] = {}
+        for item in sorted(root.rglob("*")):
+            if item.is_file():
+                files[destination / item.relative_to(root)] = item.read_bytes()
+        if not files:
+            raise InstallerError("plugin payload directory is empty")
+        return files

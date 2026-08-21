@@ -5,16 +5,20 @@ operating system and local DCC preference directories, previews exact file
 changes, and requires explicit confirmation before writing. Installations are
 recorded under `~/.dcc-mcp/installations/` for verification and safe uninstall.
 
-All four DCC installation flows are automated. Blender requires one final
+All five DCC installation flows are automated. Blender requires one final
 enable action in Preferences. Unreal Engine supports both a current-user Python
-startup and a plugin installed into a selected project.
+startup and a plugin installed into a selected project; Tuanjie is
+project-scoped only.
 
-Every DCC embeds the **same** small connector
+The four Python DCCs embed the **same** small connector
 (`plugins/common/dcc_socket_server.py`). On launch it **dials the daemon**
 (the daemon's `dcc_register_port`, default 18813), registers its identity,
 and holds the connection; the daemon assigns an `instance_id` and pushes
 requests down it. There is no listening port per DCC and no scanning. All
 DCCs are equal — the connector self-reports its kind.
+
+Tuanjie has no embedded Python, so it ships a C# connector speaking the
+identical protocol (see its section below).
 
 The daemon must be running first (or the connector retries until it is).
 The register port comes from `~/.dcc-mcp/config.toml`:
@@ -25,16 +29,17 @@ dcc_register_port = 18813
 ```
 
 Plugin files:
-- `plugins/common/dcc_socket_server.py` — shared connector (needed by all)
+- `plugins/common/dcc_socket_server.py` — shared connector (needed by the four Python DCCs)
 - `plugins/blender_daemon/` — Blender addon
 - `plugins/houdini_daemon/` — Houdini plugin
 - `plugins/ue_daemon/` — Unreal startup script
 - `plugins/maya_daemon/` — Maya startup script
+- `plugins/tuanjie_daemon/` — Tuanjie UPM package (C#; self-contained)
 
-In every case, put `dcc_socket_server.py` **next to** the per-DCC
+For the Python DCCs, put `dcc_socket_server.py` **next to** the per-DCC
 `__init__.py` (each plugin adds its own dir to `sys.path`). To override
 the register port for one DCC, set `DCC_DAEMON_REGISTER_PORT` before
-launching it.
+launching it. Tuanjie reads the port from `~/.dcc-mcp/config.toml` directly.
 
 ---
 
@@ -201,6 +206,53 @@ window through Windows; it does not run a playblast (GUI only).
 
 ---
 
+## Tuanjie 团结引擎
+
+Tuanjie is Unity's Chinese fork and the one DCC that scripts in **C#**, not
+Python — so it does not use `dcc_socket_server.py`. It installs an embedded
+**UPM package** (`plugins/tuanjie_daemon/`, a C# reimplementation of the same
+wire protocol) into a chosen project's `Packages/` folder.
+
+Like Unreal projects, Tuanjie targets are **project-scoped**.
+
+### Recommended — WebUI project installer
+
+1. Open the WebUI **Install** tab.
+2. In the Tuanjie card, enter the project folder (the one containing `Assets/`
+   and `ProjectSettings/`), then **Add project**.
+3. Preview the changes and confirm.
+
+Files land in `<project>/Packages/com.dcc-mcp.tuanjie/`. The connector's
+`[InitializeOnLoad]` starts it whenever that project's Editor loads — there is
+no add-on to enable by hand.
+
+The installer requires `m_TuanjieEditorVersion` in
+`ProjectSettings/ProjectVersion.txt`; a stock Unity project is rejected,
+because the connector targets the Tuanjie Editor.
+
+### Verify
+
+`list_instances()` shows a `tuanjie` entry (`tuanjie-1`) whose `version` looks
+like `2022.3.62t12`. Then send C#, not Python:
+
+```csharp
+result = 1 + 1;   // -> 2
+```
+
+`screenshot` captures the real Editor window through Windows; it is not an
+in-engine render.
+
+### After changing the connector's own C#
+
+Tuanjie defaults to **Hotreload**: it recompiles without reloading the managed
+domain, so a reinstalled connector keeps running the *old* assembly. Restart
+the Editor (or right-click → Reimport the package) and confirm
+`Library/ScriptAssemblies/DccDaemon.Editor.dll` is newer than the installed
+sources. Details in
+[tuanjie-csharp-execution.md](tuanjie-csharp-execution.md).
+
+---
+
 ## Running multiple instances
 
 Just launch them — each dials the daemon and registers independently. The
@@ -219,3 +271,11 @@ address each by its id.
   answering the heartbeat (heavy compute, modal dialog, or a wedge).
 - **Connector never registers** — verify the daemon is up and reachable
   at `127.0.0.1:<dcc_register_port>`.
+- **Tuanjie: connector edits seem to have no effect** — Hotreload
+  recompiled without reloading the domain, so the old assembly is still
+  live. Restart the Editor and check the DLL timestamp (see the Tuanjie
+  section above).
+- **Tuanjie: `execute_python` fails but the DCC is healthy** — read the
+  error; C# compile failures come back per-line and runtime exceptions
+  come back with a full stack trace. The same text also lands in the
+  WebUI's `/api/logs`.

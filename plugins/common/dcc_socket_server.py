@@ -44,6 +44,14 @@ _RECONNECT_START = 1.0
 _RECONNECT_MAX = 15.0
 _RECV_SIZE = 1024 * 1024
 
+# Application-level keepalive. The DCC periodically writes a tiny frame so
+# a half-open connection (TCP silently dead after some DCC operations —
+# file reload, GPU stalls, crash-recovery — with no RST/FIN) is detected:
+# the next heartbeat write fails, we drop the socket, and the reconnect
+# loop re-registers. Also lets the daemon reap registrations that stopped
+# being seen. Interval is well under the daemon's reaper timeout.
+_HEARTBEAT_INTERVAL = 5.0
+
 
 class DCCServer:
     """Connects to the daemon, registers, and serves pushed requests.
@@ -76,6 +84,7 @@ class DCCServer:
         self._exec_globals = exec_globals or (lambda: {})
         self.host = host
         self._sock: socket.socket | None = None
+        self._send_lock = threading.Lock()
         self._running = False
         self.instance_id: str | None = None
         self.connected = False
@@ -128,7 +137,14 @@ class DCCServer:
         # Register — gather identity on the main thread.
         info = self._run_on_main(self._get_info)
         hello = {"type": "register", **info}
-        sock.sendall((json.dumps(hello) + "\n").encode("utf-8"))
+        self._send(sock, hello)
+
+        # Keepalive: a daemon thread writes heartbeats so a half-open
+        # connection surfaces as a write error (→ drop → reconnect).
+        hb = threading.Thread(
+            target=self._heartbeat_loop, args=(sock,),
+            name="dcc-daemon-heartbeat", daemon=True)
+        hb.start()
 
         buffer = b""
         while self._running:
@@ -153,6 +169,35 @@ class DCCServer:
             pass
         self._sock = None
 
+    def _send(self, sock: socket.socket, frame: dict) -> None:
+        """Serialize a frame and write it under the send lock.
+
+        All writes (register, heartbeat, request replies) funnel through
+        here so frames never interleave on the wire.
+        """
+        data = (json.dumps(frame) + "\n").encode("utf-8")
+        with self._send_lock:
+            sock.sendall(data)
+
+    def _heartbeat_loop(self, sock: socket.socket) -> None:
+        """Periodically write a heartbeat frame while this socket is live.
+
+        A failed write means the connection is (half-)dead: close the
+        socket so the reader's recv unblocks and the connect loop retries.
+        """
+        while self._running and self._sock is sock:
+            time.sleep(_HEARTBEAT_INTERVAL)
+            if not (self._running and self._sock is sock):
+                break
+            try:
+                self._send(sock, {"type": "heartbeat"})
+            except OSError:
+                try:
+                    sock.close()  # unblock the reader → reconnect
+                except OSError:
+                    pass
+                break
+
     def _on_frame(self, sock: socket.socket, raw: str) -> None:
         try:
             frame = json.loads(raw)
@@ -174,7 +219,7 @@ class DCCServer:
         response = self._handle(frame)
         response["id"] = req_id
         try:
-            sock.sendall((json.dumps(response) + "\n").encode("utf-8"))
+            self._send(sock, response)
         except OSError:
             pass
 

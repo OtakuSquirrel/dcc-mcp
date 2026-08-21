@@ -21,9 +21,10 @@ from __future__ import annotations
 import logging
 
 from fastmcp import FastMCP
+from fastmcp.exceptions import ToolError
 from fastmcp.utilities.types import Image
 
-from dcc_mcp.core import DaemonCore
+from dcc_mcp.core import DaemonCore, DCCError
 
 logger = logging.getLogger(__name__)
 
@@ -33,11 +34,13 @@ mcp = FastMCP(
     "dcc",
     instructions=(
         "Unified control of local DCC applications (Blender, Houdini, "
-        "Unreal Engine, Maya) through a single daemon. Workflow: call "
+        "Unreal Engine, Maya, Tuanjie 团结引擎) through a single daemon. "
+        "Workflow: call "
         "`list_instances` to see what is running and each instance's "
         "`instance_id`, then `execute_python(instance_id, code)` to do "
         "ANYTHING — it runs Python inside that DCC (bpy / hou / unreal / "
-        "cmds are in scope) and returns whatever you assign to `result`. "
+        "cmds are in scope; Tuanjie takes C# instead) and returns whatever "
+        "you assign to `result`. "
         "There are no per-operation tools; load the relevant DCC skill "
         "for code recipes. Use `screenshot(instance_id)` to see its "
         "Windows application window and `health(instance_id)` if an instance seems "
@@ -51,7 +54,7 @@ def list_instances(refresh: bool = False) -> list[dict]:
     """List DCC instances currently registered with the daemon.
 
     Returns one entry per instance with its `instance_id` (e.g.
-    "blender-1"), `kind` (blender/houdini/ue/maya), `version`, `pid`,
+    "blender-1"), `kind` (blender/houdini/ue/maya/tuanjie), `version`, `pid`,
     open `file`, and whether it is `connected`. Pass the `instance_id`
     to every other tool.
 
@@ -70,7 +73,8 @@ def execute_python(instance_id: str, code: str) -> dict:
     materials, nodes, rendering, import/export, inspection) is done by
     sending code here. The code runs on the DCC's main thread with full
     access to its Python API (`bpy` for Blender, `hou` for Houdini,
-    `unreal` for Unreal, `cmds` for Maya). Assign to `result` to return
+    `unreal` for Unreal, `cmds` for Maya). Tuanjie is the exception: it
+    has no Python, so `code` is C# there. Assign to `result` to return
     a value:
 
         result = [o.name for o in bpy.data.objects]
@@ -81,7 +85,14 @@ def execute_python(instance_id: str, code: str) -> dict:
         instance_id: Target instance (from `list_instances`).
         code: Python source to run inside the DCC.
     """
-    return core.execute_python(instance_id, code)
+    try:
+        return core.execute_python(instance_id, code)
+    except DCCError as exc:
+        # FastMCP renders only str(exc), so the DCC-side traceback — the one
+        # thing that makes an in-DCC failure diagnosable — would be dropped.
+        # ToolError is also re-raised verbatim, bypassing mask_error_details.
+        message = f"{exc}\n\n{exc.traceback}" if exc.traceback else str(exc)
+        raise ToolError(message) from exc
 
 
 @mcp.tool()

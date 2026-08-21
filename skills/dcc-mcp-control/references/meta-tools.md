@@ -24,7 +24,7 @@ Returns the DCCs currently registered with the daemon:
   "pid": 12345, "file": "scene.blend", "connected": true}]
 ```
 
-- `kind` ∈ `blender` | `houdini` | `ue` | `maya` | `null` (unknown).
+- `kind` ∈ `blender` | `houdini` | `ue` | `maya` | `tuanjie` | `null` (unknown).
 - `instance_id` is the handle every other tool takes (e.g. `blender-1`).
 - `connected: false` — the registration exists but its connection just
   dropped; treat as gone.
@@ -37,7 +37,10 @@ this — ids are assigned by the daemon and change between runs.
 ## `execute_python(instance_id, code)`
 
 Runs `code` inside the DCC `instance_id`, on that DCC's **main thread**,
-with the DCC's Python API in scope. Returns:
+with the DCC's native API in scope. `code` is **Python** for Blender /
+Houdini / UE / Maya, and **C#** for `tuanjie` (which has no embedded Python
+interpreter) — the channel and result contract are identical either way.
+Returns:
 
 ```json
 {"instance_id": "blender-1", "result": <whatever you assigned to `result`>}
@@ -63,9 +66,11 @@ result = {"objects": [o.name for o in bpy.data.objects],
 
 If the code raises inside the DCC, the tool call fails with the
 exception message and a traceback from the DCC process — read it, it's
-the real Python traceback from inside Blender/Houdini/UE/Maya. Fix and
-resend. A transport failure (DCC disconnected) surfaces as a connection
-error; re-`list_instances()` to see if the instance is still there.
+the real traceback from inside Blender/Houdini/UE/Maya (a Python
+traceback), or for `tuanjie` a C# compile error (renumbered to your
+snippet's lines) or runtime stack trace. Fix and resend. A transport
+failure (DCC disconnected) surfaces as a connection error;
+re-`list_instances()` to see if the instance is still there.
 
 ### Timeouts
 

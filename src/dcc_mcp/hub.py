@@ -22,12 +22,22 @@ import json
 import logging
 import socket
 import threading
+import time
 from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
 
 _RECV_SIZE = 1024 * 1024
 _DEFAULT_TIMEOUT = 600.0  # execute_python can be long (renders, sims)
+
+# Reaper: DCCs send an application-level heartbeat every few seconds (see
+# plugins/common/dcc_socket_server.py). A connection that goes silent for
+# longer than this is treated as half-open (TCP dead with no FIN/RST) and
+# closed, which unregisters the stale instance. Must comfortably exceed
+# the DCC heartbeat interval so a single missed beat doesn't reap a live
+# DCC, yet be short enough that a truly dead link clears quickly.
+_HEARTBEAT_TIMEOUT = 20.0
+_REAPER_INTERVAL = 5.0
 
 
 class HubError(RuntimeError):
@@ -72,6 +82,9 @@ class _Connection:
         self._pending: dict[int, tuple[threading.Event, dict]] = {}
         self._pending_lock = threading.Lock()
         self.instance_id: str | None = None
+        # Updated on every frame received; the reaper closes connections
+        # that go silent past the heartbeat timeout (half-open detection).
+        self.last_seen = time.monotonic()
 
     # ── lifecycle ──
 
@@ -85,6 +98,7 @@ class _Connection:
                 chunk = self._sock.recv(_RECV_SIZE)
                 if not chunk:
                     return
+                self.last_seen = time.monotonic()
                 buffer += chunk
             line, buffer = buffer.split(b"\n", 1)
             reg = json.loads(line.decode("utf-8"))
@@ -95,7 +109,8 @@ class _Connection:
                 (json.dumps({"type": "registered",
                              "instance_id": self.instance_id}) + "\n").encode("utf-8"))
 
-            # Then: every subsequent frame is a reply to a request we sent.
+            # Then: every subsequent frame is a reply to a request we sent
+            # (or a heartbeat keepalive). Any received bytes prove liveness.
             while True:
                 while b"\n" in buffer:
                     frame_line, buffer = buffer.split(b"\n", 1)
@@ -104,6 +119,8 @@ class _Connection:
                 chunk = self._sock.recv(_RECV_SIZE)
                 if not chunk:
                     break
+                self.last_seen = time.monotonic()
+                logger.debug("[%s] recv returned %d bytes", self.instance_id, len(chunk))
                 buffer += chunk
         except (OSError, json.JSONDecodeError) as e:
             logger.debug("connection error for %s: %s", self.instance_id, e)
@@ -123,6 +140,8 @@ class _Connection:
                 ev.set()
             self._pending.clear()
         if self.instance_id is not None:
+            logger.debug("closing connection for %s (idle %.1fs)",
+                         self.instance_id, time.monotonic() - self.last_seen)
             self._hub._unregister(self.instance_id)
 
     def _on_reply(self, raw: str) -> None:
@@ -130,10 +149,18 @@ class _Connection:
             frame = json.loads(raw)
         except json.JSONDecodeError:
             return
+        # Heartbeat keepalive: bump last_seen immediately so the reaper
+        # never kills a connection whose heartbeats are arriving but
+        # whose recv() hasn't returned a fresh chunk yet.
+        if frame.get("type") == "heartbeat":
+            self.last_seen = time.monotonic()
+            return
         req_id = frame.get("id")
+        logger.debug("[%s] reply frame id=%s type=%s", self.instance_id, req_id, frame.get("type", ""))
         with self._pending_lock:
             slot = self._pending.pop(req_id, None)
         if slot is None:
+            logger.debug("[%s] no pending request for id=%s", self.instance_id, req_id)
             return
         ev, box = slot
         box["frame"] = frame
@@ -169,7 +196,15 @@ class _Connection:
             raise ConnectionError(box["error"])
         reply = box["frame"]
         if "error" in reply:
-            raise HubError(str(reply["error"]), traceback=reply.get("traceback"))
+            # Log at the one choke point every DCC and every command passes
+            # through: fastmcp's own logger does not propagate to root, so
+            # without this a DCC-side fault leaves no trace in the WebUI's
+            # /api/logs. The traceback goes in the message — it is a
+            # pre-formatted string from another process, not our exc_info.
+            tb = reply.get("traceback")
+            logger.warning("%s error from %s: %s%s", command, self.instance_id,
+                           reply["error"], f"\n{tb}" if tb else "")
+            raise HubError(str(reply["error"]), traceback=tb)
         return reply.get("result")
 
 
@@ -182,6 +217,9 @@ class RegistrationHub:
         self._lock = threading.Lock()
         self._by_id: dict[str, Registration] = {}
         self._kind_counters: dict[str, int] = {}
+        # Persist (kind, pid) → instance_id so a reconnecting DCC reuses its
+        # old id instead of getting a new monotonically-increasing one.
+        self._pid_to_id: dict[tuple[str, int], str] = {}
 
     # ── listener ──
 
@@ -195,6 +233,8 @@ class RegistrationHub:
         self._server_sock = sock
         self._running = True
         threading.Thread(target=self._accept_loop, name="dcc-register-accept",
+                         daemon=True).start()
+        threading.Thread(target=self._reaper_loop, name="dcc-register-reaper",
                          daemon=True).start()
         logger.info("registration hub listening on %s:%d", host, port)
 
@@ -216,22 +256,75 @@ class RegistrationHub:
             conn = _Connection(client, self)
             threading.Thread(target=conn.serve, name="dcc-conn", daemon=True).start()
 
+    def _reaper_loop(self) -> None:
+        """Close connections that stopped sending heartbeats.
+
+        Detects half-open TCP links (dead with no FIN/RST) that recv would
+        otherwise block on forever. Closing the socket unblocks the
+        connection's serve() loop, which unregisters the stale instance.
+        """
+        while self._running:
+            time.sleep(_REAPER_INTERVAL)
+            now = time.monotonic()
+            with self._lock:
+                stale = [
+                    r._conn for r in self._by_id.values()
+                    if r._conn is not None and r._conn.alive
+                    and now - r._conn.last_seen > _HEARTBEAT_TIMEOUT
+                ]
+            for conn in stale:
+                logger.warning(
+                    "reaping %s: no heartbeat for %.0fs (half-open?)",
+                    conn.instance_id, now - conn.last_seen)
+                conn.close()
+
     # ── registry (called by _Connection) ──
 
     def _register(self, conn: _Connection, reg: dict) -> str:
         kind = str(reg.get("kind", "dcc"))
+        pid = reg.get("pid")
         with self._lock:
+            # --- same-PID reconnection: reuse the old instance_id ---
+            if pid is not None:
+                key = (kind, pid)
+                reused_id = self._pid_to_id.get(key)
+                if reused_id is not None:
+                    # If there is still a live (stale) registration for this
+                    # id, disconnect it cleanly before replacing.
+                    stale = self._by_id.pop(reused_id, None)
+                    if stale is not None and stale._conn is not None:
+                        stale._conn.alive = False
+                        try:
+                            stale._conn._sock.close()
+                        except OSError:
+                            pass
+                    conn.instance_id = reused_id
+                    self._by_id[reused_id] = Registration(
+                        instance_id=reused_id,
+                        kind=kind,
+                        pid=pid,
+                        version=str(reg.get("version", "")),
+                        file=str(reg.get("file", "")),
+                        _conn=conn,
+                    )
+                    logger.info("reconnected %s (pid=%s, %s) — reused instance_id",
+                                reused_id, pid, reg.get("version"))
+                    return reused_id
+
+            # --- first-time registration ---
             n = self._kind_counters.get(kind, 0) + 1
             self._kind_counters[kind] = n
             instance_id = f"{kind}-{n}"
             self._by_id[instance_id] = Registration(
                 instance_id=instance_id,
                 kind=kind,
-                pid=reg.get("pid"),
+                pid=pid,
                 version=str(reg.get("version", "")),
                 file=str(reg.get("file", "")),
                 _conn=conn,
             )
+            if pid is not None:
+                self._pid_to_id[(kind, pid)] = instance_id
         logger.info("registered %s (pid=%s, %s)", instance_id, reg.get("pid"),
                     reg.get("version"))
         return instance_id

@@ -20,6 +20,7 @@ from dcc_mcp.installers.base import (
 from dcc_mcp.installers.blender import BlenderInstaller
 from dcc_mcp.installers.houdini import HoudiniInstaller
 from dcc_mcp.installers.maya import MayaInstaller
+from dcc_mcp.installers.tuanjie import TuanjieInstaller
 from dcc_mcp.installers.unreal import UnrealInstaller
 
 
@@ -30,19 +31,20 @@ class InstallerService:
 
     def __init__(self, *, home: Path | None = None, repo_root: Path | None = None) -> None:
         home = (home or Path.home()).resolve()
-        repo_root = (repo_root or Path(__file__).resolve().parents[4]).resolve()
+        repo_root = (repo_root or Path(__file__).resolve().parents[3]).resolve()
         self.installers: dict[str, BaseInstaller] = {
             "blender": BlenderInstaller(home, repo_root),
             "houdini": HoudiniInstaller(home, repo_root),
             "maya": MayaInstaller(home, repo_root),
             "ue": UnrealInstaller(home, repo_root),
+            "tuanjie": TuanjieInstaller(home, repo_root),
         }
         self._plans: dict[str, InstallPlan] = {}
         self._lock = threading.Lock()
 
     def scan(self) -> dict:
         supported = []
-        for kind in ("blender", "houdini", "maya", "ue"):
+        for kind in ("blender", "houdini", "maya", "ue", "tuanjie"):
             installer = self.installers.get(kind)
             if installer is None:
                 supported.append({
@@ -150,11 +152,16 @@ class InstallerService:
         result.update({"kind": kind, "target_id": target_id})
         return result
 
-    def add_unreal_project(self, path: str) -> dict:
-        installer = self.installers.get("ue")
-        if not isinstance(installer, UnrealInstaller):
-            raise InstallerError("Unreal project installation is unavailable")
+    def add_project(self, kind: str, path: str) -> dict:
+        """Register a project-scoped target (Unreal or Tuanjie)."""
+        installer = self.installers.get(kind)
+        if installer is None or not getattr(installer, "accepts_project_path", False):
+            raise InstallerError(f"project installation is unavailable for {kind}")
         return asdict(installer.add_project(path))
+
+    def add_unreal_project(self, path: str) -> dict:
+        # Kept for backward compatibility with the existing UE route.
+        return self.add_project("ue", path)
 
     def _discard_expired(self, now: float) -> None:
         expired = [plan_id for plan_id, plan in self._plans.items() if plan.expires_at < now]

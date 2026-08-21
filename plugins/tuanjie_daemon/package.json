@@ -1,0 +1,10 @@
+{
+  "name": "com.dcc-mcp.tuanjie",
+  "version": "0.1.0",
+  "displayName": "DCC Daemon Bridge (Tuanjie)",
+  "description": "Connects the Tuanjie Editor to the local dcc-daemon: registers over the shared JSON protocol and executes C# sent through execute_python.",
+  "unity": "2020.3",
+  "author": {
+    "name": "dcc-mcp"
+  }
+}

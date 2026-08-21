@@ -1,8 +1,8 @@
 # dcc-mcp
 
 A local daemon that lets AI agents drive DCC applications — **Blender**,
-**Houdini**, **Unreal Engine**, **Maya** — by sending Python to them over
-a single, uniform channel.
+**Houdini**, **Unreal Engine**, **Maya**, **Tuanjie 团结引擎** — by sending code to
+them over a single, uniform channel.
 
 ## What it is
 
@@ -17,20 +17,21 @@ and DCCs:
 
 ```
   agent ── MCP / HTTP ──▶  dcc-mcp  ◀── register ── Blender  ┐
-  (Claude Code)            (guardian)  ◀── register ── Houdini  │ DCCs dial IN
-                                       ◀── register ── Unreal   │ and hold a
-                                       ◀── register ── Maya     ┘ connection
+  (Claude Code)   (guardian)  ◀── register ── Houdini  │ DCCs dial IN
+     ◀── register ── Unreal│ and hold a
+     ◀── register ── Maya     │ connection
+         ◀── register ── Tuanjie  ┘
 ```
 
 ## Why it is built this way
 
 **One channel instead of many tools.** The agent is given ~4 meta-tools,
 not a catalogue of per-operation tools. Everything — modeling, materials,
-nodes, rendering, import/export, inspection — is done by sending Python
+nodes, rendering, import/export, inspection — is done by sending code
 to the DCC via `execute_python(instance_id, code)`. DCC-specific know-how
-(bpy / hou / unreal / cmds recipes) lives in agent **Skills** loaded on
-demand, so the system prompt stays small and the tool surface doesn't
-grow with the API.
+(bpy / hou / unreal / cmds recipes, and C# for Tuanjie) lives in agent
+**Skills** loaded on demand, so the system prompt stays small and the
+tool surface doesn't grow with the API.
 
 **All DCCs are equal; the `instance_id` is the only address.** A caller
 names an instance and sends code. DCCs are transparent — the agent
@@ -54,34 +55,44 @@ resident process.
 | Tool | Purpose |
 |------|---------|
 | `list_instances()` | List registered DCCs → `instance_id`, `kind`, `version`, `pid`, `file`, `connected` |
-| `execute_python(instance_id, code)` | The universal channel — run Python in the DCC, return what it sets as `result` |
+| `execute_python(instance_id, code)` | The universal channel — run code in the DCC (Python for most, C# for Tuanjie), return what it sets as `result` |
 | `screenshot(instance_id)` | Capture the DCC's real Windows application window |
 | `health(instance_id)` | Verdict (healthy/busy/hung/dead) via a main-thread heartbeat — never hangs |
 
 ## One protocol, registration model
 
-Every DCC embeds the same minimal connector
-(`plugins/common/dcc_socket_server.py`) and speaks newline-delimited
+Every DCC embeds the same minimal connector and speaks newline-delimited
 JSON. On launch it **dials the daemon's register port** (default 18813),
 sends its identity, and holds the connection; the daemon assigns an
 `instance_id` and pushes requests down it. No listening port per DCC, no
 scanning — the plugin self-reports its `kind`, and a dropped socket means
 the instance is gone.
 
+The Python DCCs (Blender, Houdini, Maya, Unreal) vendor the shared
+`plugins/common/dcc_socket_server.py`. **Tuanjie is the exception**: it has
+no embedded Python interpreter, so its connector
+(`plugins/tuanjie_daemon/`) is a dependency-free C# reimplementation of the
+same wire protocol. There the `execute_python` channel carries C# source,
+compiled and run via Roslyn on the Editor main thread — the protocol is
+identical, only the language and runtime differ. How that compile works, and
+the Mono/Hotreload traps behind its shape, are recorded in
+[docs/tuanjie-csharp-execution.md](docs/tuanjie-csharp-execution.md).
+
 The only per-DCC difference is how code hops to the main thread (the DCC
 APIs are not thread-safe):
 
-| DCC | Main-thread bridge |
-|-----|--------------------|
-| Blender | `bpy.app.timers` + job queue |
-| Unreal | `register_slate_post_tick_callback` + job queue |
-| Houdini | `hdefereval.executeInMainThreadWithResult` |
-| Maya | `maya.utils.executeInMainThreadWithResult` |
+| DCC | Language | Main-thread bridge |
+|-----|----------|--------------------|
+| Blender | Python | `bpy.app.timers` + job queue |
+| Unreal | Python | `register_slate_post_tick_callback` + job queue |
+| Houdini | Python | `hdefereval.executeInMainThreadWithResult` |
+| Maya | Python | `maya.utils.executeInMainThreadWithResult` |
+| Tuanjie | C# | `EditorApplication.update` pump + job queue (Roslyn) |
 
 The shared connector takes a `run_on_main` callable; everything else is
 identical. (Houdini previously used RPyC/`hrpyc`; it was unified onto the
-same connector so all four share one protocol and the daemon needs no
-per-DCC special case.)
+same connector so the Python DCCs share one protocol and the daemon needs
+no per-DCC special case. Tuanjie mirrors that protocol in C#.)
 
 ## Quick start (local)
 
@@ -131,15 +142,18 @@ reachable — so start the daemon *first*, then (re)start your agent
 ### 4. Install a DCC plugin
 
 Open the WebUI **Install** tab and click **Scan this computer**. Blender,
-Houdini, Maya, and Unreal Engine support preview-and-confirm installation,
-verification, and manifest-based uninstall. Blender still needs its installed
-add-on enabled in Preferences; Houdini and Maya start automatically after
-restart.
+Houdini, Maya, Unreal Engine, and Tuanjie support preview-and-confirm
+installation, verification, and manifest-based uninstall. Blender still needs
+its installed add-on enabled in Preferences; Houdini and Maya start
+automatically after restart.
 
 Unreal Engine offers a current-user startup shared by installed UE versions and
 a project-scoped plugin for a selected `.uproject`. UE's Python Editor Script
-Plugin must be enabled for each project. The Blender development-checkout flow
-also remains available. Blender example:
+Plugin must be enabled for each project. Tuanjie is likewise project-scoped: pick
+a Tuanjie project folder and the daemon installs an embedded UPM package under
+`<project>/Packages/com.dcc-mcp.daemon/` that auto-starts via
+`[InitializeOnLoad]` when the Editor opens. The Blender development-checkout
+flow also remains available. Blender example:
 
 Assemble a folder with **both** the per-DCC file and the shared connector:
 
@@ -172,8 +186,8 @@ screenshot("blender-1")             -> the Windows application window
 ```
 
 There are no per-operation tools — the agent writes `bpy`/`hou`/`unreal`/
-`cmds` and sends it through `execute_python`; the `dcc-control` skill
-(under `skills/`) teaches the recipes.
+`cmds` (or C# for Tuanjie) and sends it through `execute_python`; the
+`dcc-control` skill (under `skills/`) teaches the recipes.
 
 ## Configuration
 
@@ -208,8 +222,10 @@ plugins/blender_daemon/     Blender addon (bpy.app.timers bridge)
 plugins/houdini_daemon/     Houdini plugin (hdefereval bridge)
 plugins/ue_daemon/          Unreal script (slate post-tick bridge)
 plugins/maya_daemon/        Maya plugin (executeInMainThreadWithResult bridge)
+plugins/tuanjie_daemon/     Tuanjie UPM package (C# connector + Roslyn, EditorApplication.update bridge)
 skills/dcc-control/         agent skill: how to drive DCCs via execute_python (SKILL.md + references/)
-docs/                       plugin-install guide + registration-model design note
+docs/                       plugin-install guide, registration-model design note,
+                            Tuanjie C#-execution engineering note
 ```
 
 ## Testing
@@ -219,8 +235,10 @@ real protocol**, exercising the daemon's actual code paths:
 
 - `tests/test_e2e.py` — a real `DCCServer` from `plugins/common/` dials a
   real `RegistrationHub` over loopback and registers, parametrized over
-  all four DCC kinds. Covers register/execute/inspect/health/screenshot
-  and error propagation.
+  the DCC kinds. Covers register/execute/inspect/health/screenshot
+  and error propagation. (Tuanjie's real connector is C#, but the daemon is
+  kind-agnostic, so the `tuanjie` case exercises registration/routing/health
+  over the identical wire protocol via the shared Python stand-in.)
 - `tests/test_webui.py` — the dashboard + JSON APIs via Starlette's
   TestClient.
 ```bash
@@ -228,14 +246,16 @@ uv run pytest tests/   # 52 tests
 uv run ruff check src/ plugins/
 ```
 
-What this does **not** cover — real bpy/hou/unreal/cmds API calls,
-main-thread timing inside a live DCC, and every desktop/window arrangement — is
-verified manually against running DCCs.
+What this does **not** cover — real bpy/hou/unreal/cmds API calls (or C#
+compiled via Roslyn inside a live Tuanjie Editor), main-thread timing inside
+a live DCC, and every desktop/window arrangement — is verified manually
+against running DCCs.
 
 ### Windows portable build
 
 A self-contained Windows x64 build includes the Python runtime, daemon,
-WebUI, screenshot dependencies, and all four managed DCC plugin payloads:
+WebUI, screenshot dependencies, and all managed DCC plugin payloads
+(including the Tuanjie UPM package):
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/build-portable.ps1
@@ -250,9 +270,10 @@ The build runs the frozen executable on isolated ports, performs a real MCP
 
 - **Done:** guardian daemon; registration model (DCCs dial in, live
   registry, free death detection); one JSON protocol across Blender,
-  Houdini, Unreal, Maya; main-thread-heartbeat health; MCP-over-HTTP
-  ingress; Windows window capture; monitoring/install WebUI; managed DCC
-  installers; Windows portable build; tests.
+  Houdini, Unreal, Maya (Python) and Tuanjie (C#/Roslyn);
+  main-thread-heartbeat health; MCP-over-HTTP ingress; Windows window
+  capture; monitoring/install WebUI; managed DCC installers; Windows
+  portable build; tests.
 - **Next:** tray launcher + login autostart; Agent MCP/Skill installer;
   signed Inno Setup package; clean-machine integration coverage; protocol
   and reconnect hardening.

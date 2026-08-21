@@ -26,10 +26,22 @@ payloads = {
         "dcc_mcp/installers/payloads/maya_daemon"
     ),
     repo_root / "plugins" / "ue_daemon" / "__init__.py": (
-        "dcc_mcp/installers/payloads/ue_daemon"
+     "dcc_mcp/installers/payloads/ue_daemon"
     ),
 }
 datas += [(str(source), destination) for source, destination in payloads.items()]
+
+# Tuanjie ships a whole folder of C# sources + package metadata (not the two
+# Python files every other DCC vendors), so collect the tree wholesale into
+# the payloads/tuanjie_daemon destination the installer looks up.
+tuanjie_src = repo_root / "plugins" / "tuanjie_daemon"
+for item in tuanjie_src.rglob("*"):
+    if item.is_file():
+        rel_parent = item.parent.relative_to(tuanjie_src)
+        dest = "dcc_mcp/installers/payloads/tuanjie_daemon"
+        if rel_parent.parts:
+            dest = dest + "/" + "/".join(rel_parent.parts)
+        datas.append((str(item), dest))
 
 hiddenimports = (
     collect_submodules("uvicorn.lifespan")

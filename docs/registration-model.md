@@ -100,12 +100,37 @@ network thread while the main thread is wedged. So:
 
 Verdicts stay: `healthy | busy | hung | dead(=disconnected) | unknown`.
 
+### Keepalive / half-open detection
+
+A dropped socket normally surfaces as `recv` returning empty. But some
+DCC operations (notably in Blender: file reload, GPU stalls,
+crash-recovery) can leave the TCP connection **half-open** — dead with no
+FIN/RST — so both ends' `recv` block forever and the stale registration
+lingers. To close this gap the connection is kept alive at the
+application layer:
+
+- **DCC → daemon heartbeat.** Every few seconds
+  (`_HEARTBEAT_INTERVAL`, 5s) each connector writes a tiny
+  `{"type":"heartbeat"}` frame. If that write fails, the link is
+  (half-)dead: the connector drops the socket, unblocking its reader, and
+  the reconnect loop re-registers.
+- **Daemon reaper.** The hub records `last_seen` on every received frame
+  and a background reaper (`_REAPER_INTERVAL`) closes any connection
+  silent past `_HEARTBEAT_TIMEOUT` (20s), which unregisters the stale
+  instance. Heartbeat frames are consumed silently — they only refresh
+  `last_seen`, never routed as request replies.
+
+This applies to every DCC: the Python connector
+(`plugins/common/dcc_socket_server.py`, shared by Blender/Houdini/UE/Maya)
+and the C# connector (`plugins/tuanjie_daemon/DccDaemonServer.cs`).
+
 ## Obstacles and how they're handled
 
 | Obstacle | Handling |
 |----------|----------|
 | DCC starts before daemon / daemon restarts | Plugin retries `connect` with exponential backoff. Daemon restart ⇒ all DCCs reconnect; a few-second gap where they were unreachable anyway. |
 | Frozen DCC still holds socket | Main-thread heartbeat (above), not socket state, decides responsiveness. |
+| Half-open connection (TCP dead, no FIN/RST — e.g. Blender after a heavy op) | App-level keepalive: DCC writes a periodic heartbeat (failed write ⇒ drop & reconnect); daemon reaps connections silent past the timeout. See "Keepalive / half-open detection." |
 | Agent handle churn | `port` → `instance_id` across meta-tools + skill. One-time, mechanical. |
 | Ordering of replies over one socket | Multiplex by request `id`. Per-instance lock keeps main-thread calls serialized. |
 | Config | Drop `[ports] dcc = [...]` pool entirely. Add `[daemon] dcc_register_port`. `read_dcc_ports`/`dcc_ports`/`claim_and_start` removed. |
