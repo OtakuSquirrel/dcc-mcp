@@ -13,6 +13,7 @@ from dcc_mcp.installers import InstallerService
 from dcc_mcp.installers.base import InstallerError
 from dcc_mcp.mcp_server import core, mcp
 from dcc_mcp.webui.diagnostics import snapshot as diagnostics_snapshot
+from dcc_mcp.webui.integrations import integration_examples
 from dcc_mcp.webui.log_buffer import clear_logs, get_logs
 
 logger = logging.getLogger(__name__)
@@ -33,7 +34,7 @@ _PAGE = """<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>dcc-mcp</title>
 <style>
-  :root { color-scheme:dark; --bg:#14161a; --panel:#1b1f26; --line:#2a2e35; --muted:#9299a4; --text:#e6e8ec; --accent:#67a7ff; }
+  :root { color-scheme:dark; --bg:#14161a; --panel:#1b1f26; --line:#2a2e35; --muted:#9299a4; --text:#e6e8ec; --accent:#67a7ff; --surface-code:#111318; --alpha-hover:rgba(255,255,255,.05); --alpha-selected:rgba(255,255,255,.10); --ease:cubic-bezier(.16,1,.3,1); --duration:180ms; --copy-width:88px; }
   * { box-sizing:border-box; }
   body { font:14px/1.5 system-ui,sans-serif; margin:0; background:var(--bg); color:var(--text); }
   header { padding:16px 24px; border-bottom:1px solid var(--line); display:flex; align-items:baseline; gap:14px; }
@@ -43,7 +44,7 @@ _PAGE = """<!doctype html>
   nav { border-right:1px solid var(--line); padding:18px 12px; }
   nav button { display:block; width:100%; text-align:left; margin:0 0 5px; border:0; background:transparent; }
   nav button.active { background:#283142; color:#fff; }
-  main { padding:24px; max-width:1100px; width:100%; }
+  main { padding:24px; max-width:1100px; width:100%; min-width:0; }
   section { display:none; } section.active { display:block; }
   .row { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom:14px; }
   .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:12px; }
@@ -92,17 +93,46 @@ _PAGE = """<!doctype html>
   .tool-call { background:#0f1420; border:1px solid #24304a; color:#8fd0ff; }
   .tool-more { margin-top:8px; } .tool-more summary { cursor:pointer; color:var(--muted); }
   .tool-more table { margin-top:8px; }
-  @media (max-width:720px) { .shell { grid-template-columns:1fr; } nav { border-right:0; border-bottom:1px solid var(--line); display:flex; overflow:auto; } nav button { width:auto; white-space:nowrap; } main { padding:16px; } }
+  #integrations { min-width:0; }
+  nav { background:var(--panel); padding:16px 8px; }
+  nav button { min-width:0; min-height:32px; margin-bottom:2px; padding:6px 8px; border-radius:8px; font:inherit; overflow:hidden; text-overflow:ellipsis; transition:background-color var(--duration) var(--ease),color var(--duration) var(--ease); }
+  nav button:hover { background:var(--alpha-hover); }
+  nav button.active { background:var(--alpha-selected); color:var(--text); }
+  .integration-endpoint { display:flex; flex-wrap:wrap; align-items:center; gap:8px 16px; margin-bottom:16px; }
+  .integration-endpoint code { flex:1; min-width:0; }
+  .integration-note { margin:0 0 24px; color:var(--muted); }
+  .integration-grid { grid-template-columns:repeat(auto-fit,minmax(min(100%,360px),1fr)); align-items:start; gap:16px; }
+  .integration-card { min-width:0; padding:16px; border-radius:12px; }
+  .integration-head { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:8px; }
+  .integration-head h3 { font-size:16px; line-height:24px; margin:0; min-width:0; }
+  .integration-path { display:block; margin-bottom:12px; }
+  .integration-card pre { background:var(--surface-code); padding:12px; margin:0; font:12px/20px ui-monospace,Consolas,monospace; white-space:pre-wrap; overflow-wrap:anywhere; border-radius:8px; }
+  .integration-card pre code { background:transparent; padding:0; border-radius:0; }
+  .integration-card p { margin:12px 0 0; color:var(--muted); font-size:12px; line-height:16px; }
+  .integration-card a { display:inline-block; margin-top:12px; color:var(--accent); font-size:12px; }
+  .integration-language { color:var(--muted); font-size:12px; line-height:16px; margin-bottom:4px; }
+  .integration-api-heading { margin:24px 0 16px; font-size:16px; line-height:24px; }
+  .copy-button { display:inline-grid; flex:0 0 var(--copy-width); width:var(--copy-width); min-height:32px; padding:6px 8px; border:0; border-radius:8px; font:14px/20px system-ui,sans-serif; white-space:nowrap; transition:background-color var(--duration) var(--ease),transform var(--duration) var(--ease); }
+  .copy-button:active { transform:scale(.98); }
+  .copy-button span { grid-area:1/1; opacity:0; transition:opacity var(--duration) var(--ease); }
+  .copy-button[data-state="idle"] .copy-idle,.copy-button[data-state="success"] .copy-success,.copy-button[data-state="error"] .copy-error { opacity:1; }
+  nav button:focus-visible,.copy-button:focus-visible,.integration-card a:focus-visible,.integration-card pre:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+  .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; border:0; }
+  section#integrations.active { animation:integration-enter var(--duration) var(--ease); }
+  @keyframes integration-enter { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:translateY(0); } }
+  @media (prefers-reduced-motion:reduce) { nav button,.copy-button,.copy-button span { transition:none; } section#integrations.active { animation:none; } .copy-button:active { transform:none; } }
+  @media (max-width:720px) { .shell { grid-template-columns:1fr; } nav { border-right:0; border-bottom:1px solid var(--line); display:flex; overflow:auto; } nav button { width:auto; flex-shrink:0; white-space:nowrap; } main { padding:16px; } .integration-endpoint { display:grid; grid-template-columns:minmax(0,1fr) var(--copy-width); } .integration-endpoint > code { grid-row:2; grid-column:1/-1; } .integration-endpoint > .copy-button { grid-row:1; grid-column:2; } }
 </style>
 </head>
 <body>
 <header><h1>dcc-mcp</h1><span class="sub">local DCC control · <span id="header-status">ready</span></span></header>
 <div class="shell">
 <nav>
-  <button class="active" data-tab="overview">Overview</button>
+  <button class="active" data-tab="overview" aria-current="page">Overview</button>
   <button data-tab="tools">Tools</button>
   <button data-tab="logs">Logs</button>
   <button data-tab="install">Install</button>
+  <button data-tab="integrations">API/MCP接入</button>
   <button data-tab="diagnostics">Diagnostics</button>
 </nav>
 <main>
@@ -145,6 +175,16 @@ _PAGE = """<!doctype html>
     <div id="install-preview" class="card" style="margin-top:12px" hidden></div>
   </section>
 
+  <section id="integrations" aria-labelledby="integrations-heading">
+    <h2 id="integrations-heading">API/MCP接入</h2>
+    <div class="integration-endpoint"><span>MCP · Streamable HTTP</span><code id="integration-endpoint"></code><button class="copy-button" data-state="idle" data-copy-target="integration-endpoint" aria-label="复制 MCP 地址"><span class="copy-idle" aria-hidden="true">复制</span><span class="copy-success" aria-hidden="true">已复制</span><span class="copy-error" aria-hidden="true">复制失败</span></button></div>
+    <p class="integration-note">先启动 dcc-mcp，再连接客户端。已有配置时合并 dcc 条目，保留其他服务；~ 表示用户目录，Windows 对应 %USERPROFILE%。保存后在客户端重新连接或重启。</p>
+    <div id="integration-clients" class="grid integration-grid"></div>
+    <h3 class="integration-api-heading">API 调用示例</h3>
+    <div id="integration-api" class="grid integration-grid"></div>
+    <span id="integration-feedback" class="sr-only" role="status" aria-live="polite"></span>
+  </section>
+
   <section id="diagnostics">
     <h2>Diagnostics</h2>
     <div class="row"><button onclick="loadDiagnostics()">Run diagnostics</button><span class="sub">Read-only local checks</span></div>
@@ -156,17 +196,62 @@ _PAGE = """<!doctype html>
 </div>
 <script>
 const KIND_COLOR = __KIND_COLOR__;
+const INTEGRATIONS = __INTEGRATION_DATA__;
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const shortTime = value => value ? value.slice(11,23) : '—';
 
 document.querySelectorAll('nav button').forEach(button => button.addEventListener('click', () => {
   document.querySelectorAll('nav button').forEach(x => x.classList.toggle('active', x === button));
+  document.querySelectorAll('nav button').forEach(x => x.setAttribute('aria-current', x === button ? 'page' : 'false'));
   document.querySelectorAll('main section').forEach(x => x.classList.toggle('active', x.id === button.dataset.tab));
   if (button.dataset.tab === 'logs') loadLogs();
   if (button.dataset.tab === 'tools') loadTools();
   if (button.dataset.tab === 'install') scanInstallers();
   if (button.dataset.tab === 'diagnostics') loadDiagnostics();
 }));
+
+function renderIntegrations() {
+  document.getElementById('integration-endpoint').textContent = INTEGRATIONS.endpoint;
+  const cards = examples => examples.map(item => `<article class="card integration-card">
+    <div class="integration-head"><h3>${esc(item.name)}</h3><button class="copy-button" data-state="idle" data-copy-target="config-${esc(item.id)}" aria-label="复制 ${esc(item.name)} 配置"><span class="copy-idle" aria-hidden="true">复制</span><span class="copy-success" aria-hidden="true">已复制</span><span class="copy-error" aria-hidden="true">复制失败</span></button></div>
+    <code class="integration-path">${esc(item.path)}</code><div class="integration-language">${esc(item.language)}</div>
+    <pre tabindex="0"><code id="config-${esc(item.id)}">${esc(item.code)}</code></pre><p>${esc(item.note)}</p>
+    ${item.docs ? `<a href="${esc(item.docs)}" target="_blank" rel="noopener noreferrer">官方文档</a>` : ''}</article>`).join('');
+  document.getElementById('integration-clients').innerHTML = cards(INTEGRATIONS.clients);
+  document.getElementById('integration-api').innerHTML = cards(INTEGRATIONS.api);
+}
+
+const copyTimers = new Map();
+const copyRequests = new WeakMap();
+document.getElementById('integrations').addEventListener('click', async event => {
+  const button = event.target.closest('button[data-copy-target]');
+  if (!button) return;
+  const target = document.getElementById(button.dataset.copyTarget);
+  const request = {};
+  copyRequests.set(button, request);
+  clearTimeout(copyTimers.get(button));
+  const feedback = document.getElementById('integration-feedback');
+  feedback.textContent = '';
+  let state = 'success';
+  try {
+    await navigator.clipboard.writeText(target.textContent);
+  } catch (error) {
+    state = 'error';
+  }
+  if (copyRequests.get(button) !== request) return;
+  button.dataset.state = state;
+  feedback.textContent = state === 'success' ? '已复制' : '复制失败，请选中代码后手动复制。';
+  if (state === 'error') {
+    const range = document.createRange();
+    range.selectNodeContents(target);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+  copyTimers.set(button, setTimeout(() => { button.dataset.state = 'idle'; copyTimers.delete(button); }, 2500));
+});
+window.addEventListener('pagehide', () => { copyTimers.forEach(clearTimeout); copyTimers.clear(); });
+renderIntegrations();
 
 async function jsonFetch(url, options) {
   const response = await fetch(url, options);
@@ -184,7 +269,7 @@ async function loadInstances(showStatus=false) {
     document.getElementById('instance-empty').hidden = data.length > 0;
     document.getElementById('overview-cards').innerHTML =
       `<div class="card"><span class="muted">Registered instances</span><div class="value">${data.length}</div></div>`+
-      `<div class="card"><span class="muted">MCP endpoint</span><div class="value"><code>${esc(location.origin+'/mcp')}</code></div></div>`;
+      `<div class="card"><span class="muted">MCP endpoint</span><div class="value"><code>${esc(INTEGRATIONS.endpoint)}</code></div></div>`;
     for (const item of data) {
       const tr = document.createElement('tr');
       const hid = 'health-' + String(item.instance_id).replace(/[^a-zA-Z0-9_-]/g,'_');
@@ -387,7 +472,12 @@ function instanceById(id){
 
 
 async def _index(_request: Request) -> HTMLResponse:
-    return HTMLResponse(_PAGE)
+    origin = str(_request.base_url).rstrip("/")
+    mcp_path = getattr(_request.app.state, "mcp_path", "/mcp")
+    data = integration_examples(origin + mcp_path, origin)
+    # The data lives in a script element; a custom path must not close it.
+    encoded = json.dumps(data, ensure_ascii=False).replace("<", "\\u003c")
+    return HTMLResponse(_PAGE.replace("__INTEGRATION_DATA__", encoded))
 
 
 async def _api_instances(request: Request) -> JSONResponse:

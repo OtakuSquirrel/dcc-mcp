@@ -1,6 +1,8 @@
 ---
 name: dcc-control
 description: Control local DCC applications (Blender, Houdini, Unreal Engine, Maya, Tuanjie 团结引擎) through the dcc-daemon. Use this whenever the task involves creating, editing, inspecting, or rendering in a 3D DCC — modeling, materials, node graphs, animation, lighting, cameras, import/export, screenshots. You drive the DCC by sending code, not by calling many per-operation tools.
+allowed-tools: 
+disable: true
 ---
 
 # Controlling DCCs via the daemon

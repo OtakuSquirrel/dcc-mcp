@@ -115,8 +115,11 @@ uv run dcc-mcp            # serves MCP on 127.0.0.1:18812, register hub on :1881
 ```
 
 On Windows, double-click **`start-daemon.bat`** instead — it opens a
-console window that streams logs live; close the window to stop the
-daemon.
+console window that streams logs live. Each launch stops the previous
+dcc-mcp process from this checkout, waits for its configured ports to be
+released, and starts the current code. Unrelated applications and daemons
+from other checkouts are not stopped; a port conflict leaves an error in
+the console. Close the window to stop the daemon.
 
 **Is it running?** Open <http://127.0.0.1:18812/> in a browser. The local
 WebUI provides instance monitoring, a bounded daemon log viewer, local DCC
@@ -133,6 +136,11 @@ as an MCP server over HTTP:
 ```json
 { "mcpServers": { "dcc": { "type": "http", "url": "http://127.0.0.1:18812/mcp" } } }
 ```
+
+The WebUI **API/MCP接入** menu shows copyable configurations and file locations
+for Claude Code, Codex, Cursor, VS Code, and CodeBuddy CLI, plus Python MCP
+and HTTP API examples. Examples use the dashboard's current host, port, and
+configured MCP path. Merge the `dcc` entry into existing client settings.
 
 MCP servers load at agent **startup**, and only if the endpoint is
 reachable — so start the daemon *first*, then (re)start your agent

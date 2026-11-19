@@ -7,7 +7,9 @@ the dashboard HTML and the two JSON endpoints without needing a live DCC.
 
 from __future__ import annotations
 
+import json
 import logging
+import tomllib
 
 from starlette.testclient import TestClient
 
@@ -28,6 +30,7 @@ def test_dashboard_html():
         assert 'data-tab="logs"' in r.text
         assert 'data-tab="tools"' in r.text
         assert 'data-tab="install"' in r.text
+        assert 'data-tab="integrations">API/MCP接入</button>' in r.text
         assert 'data-tab="diagnostics"' in r.text
         assert "Rescan this computer" in r.text
         assert "Uninstall" in r.text
@@ -36,6 +39,31 @@ def test_dashboard_html():
         assert "Add project" in r.text
         assert "/api/installers/${encodeURIComponent(kind)}/projects" in r.text
         assert "function addProject(kind)" in r.text
+
+
+def test_integration_examples_follow_live_endpoint():
+    # A non-default port and MCP path must propagate into every copied example.
+    app = build_app(mcp_path="/agent/mcp", webui=True)
+    with TestClient(app, base_url="http://127.0.0.1:19876") as client:
+        html = client.get("/").text
+        data = json.loads(html.split("const INTEGRATIONS = ", 1)[1].split(";\n", 1)[0])
+        endpoint = "http://127.0.0.1:19876/agent/mcp"
+        assert data["endpoint"] == endpoint
+        assert {item["id"] for item in data["clients"]} == {
+            "claude-code", "codex", "cursor", "vscode", "codebuddy"
+        }
+        for item in data["clients"]:
+            if item["language"] == "TOML":
+                config = tomllib.loads(item["code"])
+                server = config["mcp_servers"]["dcc"]
+            else:
+                config = json.loads(item["code"])
+                root = "servers" if item["id"] == "vscode" else "mcpServers"
+                server = config[root]["dcc"]
+            assert server["url"] == endpoint
+        assert endpoint in data["api"][0]["code"]
+        assert "http://127.0.0.1:19876/api/instances" in data["api"][1]["code"]
+        assert "__INTEGRATION_DATA__" not in html
 
 
 def test_api_instances_is_list():

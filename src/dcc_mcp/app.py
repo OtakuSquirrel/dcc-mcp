@@ -44,4 +44,6 @@ def build_app(
         except ImportError:
             logger.warning("starlette not available — serving MCP only (no WebUI)")
 
-    return mcp.http_app(path=mcp_path)
+    app = mcp.http_app(path=mcp_path)
+    app.state.mcp_path = mcp_path
+    return app
